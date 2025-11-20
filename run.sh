@@ -107,7 +107,7 @@ case "${1:-apply}" in
             echo -e "${RED}Error: provisioning/provision-all.sh not found${NC}"
             exit 1
         fi
-        "$SCRIPT_DIR/provisioning/provision-all.sh"
+        sg lxd -c "$SCRIPT_DIR/provisioning/provision-all.sh"
         ;;
 
     status)

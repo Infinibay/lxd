@@ -24,14 +24,14 @@ provision_container() {
     echo -e "${BLUE}Provisioning ${container}...${NC}"
 
     # Copy script to container
-    sg lxd -c "lxc file push '$SCRIPT_DIR/$script' '$container/tmp/provision.sh'"
+    lxc file push "$SCRIPT_DIR/$script" "$container/tmp/provision.sh"
 
     # Make it executable and run it
-    sg lxd -c "lxc exec '$container' -- chmod +x /tmp/provision.sh"
-    sg lxd -c "lxc exec '$container' -- /tmp/provision.sh"
+    lxc exec "$container" -- chmod +x /tmp/provision.sh
+    lxc exec "$container" -- /tmp/provision.sh
 
     # Clean up
-    sg lxd -c "lxc exec '$container' -- rm /tmp/provision.sh"
+    lxc exec "$container" -- rm /tmp/provision.sh
 
     echo -e "${GREEN}✓ ${container} provisioned successfully${NC}"
     echo ""
@@ -39,7 +39,7 @@ provision_container() {
 
 # Check if containers are running
 echo "Checking container status..."
-if ! sg lxd -c "lxc list" | grep -q "infinibay-postgres.*RUNNING"; then
+if ! lxc list | grep -q "infinibay-postgres.*RUNNING"; then
     echo -e "${RED}Error: Containers are not running${NC}"
     echo "Run './run.sh apply' first"
     exit 1
@@ -65,7 +65,7 @@ echo ""
 echo -e "${GREEN}=== Provisioning Complete! ===${NC}"
 echo ""
 echo "Container Status:"
-sg lxd -c "lxc list" | grep infinibay
+lxc list | grep infinibay
 echo ""
 echo "Next steps:"
 echo "  1. Update database password in values.yml"
