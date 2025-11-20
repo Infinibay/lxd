@@ -1,0 +1,8 @@
+name: infinibay-base
+description: Base profile for Infinibay containers with shared code directory
+config: {}
+devices:
+  infinibay-code:
+    type: disk
+    source: /home/andres/infinibay
+    path: /opt/infinibay

@@ -40,12 +40,16 @@ projects:
 
         common_profiles:
           - default
+          - infinibay-base
 
         # Nodes are the actual containers
         nodes:
           - name: "infinibay-postgres"
             image_source: "22.04"
             image_remote_server: "ubuntu"
+
+            profiles:
+              - infinibay-postgres
 
             config:
               limits.memory: "{{ .Values.POSTGRES_MEMORY_LIMIT }}"
@@ -65,11 +69,15 @@ projects:
 
         common_profiles:
           - default
+          - infinibay-base
 
         nodes:
           - name: "infinibay-redis"
             image_source: "22.04"
             image_remote_server: "ubuntu"
+
+            profiles:
+              - infinibay-redis
 
             config:
               limits.memory: "{{ .Values.REDIS_MEMORY_LIMIT }}"
@@ -82,22 +90,20 @@ projects:
 
         common_profiles:
           - default
+          - infinibay-base
 
         nodes:
           - name: "infinibay-backend"
             image_source: "24.04"
             image_remote_server: "ubuntu"
 
+            profiles:
+              - infinibay-backend
+
             config:
               limits.memory: "{{ .Values.BACKEND_MEMORY_LIMIT }}"
               limits.cpu: 4
               security.nesting: "true"
-
-            # TODO: Add KVM device and libvirt socket mounts
-            # devices:
-            #   kvm:
-            #     type: unix-char
-            #     path: /dev/kvm
 
       # Frontend UI
       - name: "frontend"
@@ -106,11 +112,15 @@ projects:
 
         common_profiles:
           - default
+          - infinibay-base
 
         nodes:
           - name: "infinibay-frontend"
             image_source: "22.04"
             image_remote_server: "ubuntu"
+
+            profiles:
+              - infinibay-frontend
 
             config:
               limits.memory: "{{ .Values.FRONTEND_MEMORY_LIMIT }}"

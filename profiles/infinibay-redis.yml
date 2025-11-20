@@ -1,0 +1,8 @@
+name: infinibay-redis
+description: Infinibay Redis profile with persistent data
+config: {}
+devices:
+  redis-data:
+    type: disk
+    source: /home/andres/infinibay/data/redis
+    path: /data

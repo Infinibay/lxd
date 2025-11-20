@@ -1,0 +1,12 @@
+name: infinibay-backend
+description: Infinibay Backend profile with KVM access and persistent data
+config: {}
+devices:
+  backend-data:
+    type: disk
+    source: /home/andres/infinibay/data/backend
+    path: /data
+  kvm:
+    type: unix-char
+    source: /dev/kvm
+    path: /dev/kvm

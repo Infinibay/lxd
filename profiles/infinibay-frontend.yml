@@ -1,0 +1,8 @@
+name: infinibay-frontend
+description: Infinibay Frontend profile with persistent data
+config: {}
+devices:
+  frontend-data:
+    type: disk
+    source: /home/andres/infinibay/data/frontend
+    path: /data

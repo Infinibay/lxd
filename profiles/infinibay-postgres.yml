@@ -1,0 +1,8 @@
+name: infinibay-postgres
+description: Infinibay PostgreSQL profile with persistent data
+config: {}
+devices:
+  postgres-data:
+    type: disk
+    source: /home/andres/infinibay/data/postgres
+    path: /data
