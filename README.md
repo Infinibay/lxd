@@ -66,27 +66,38 @@ cd infinibay/lxd
 # 2. Run setup (installs LXD, lxd-compose, Go)
 sudo ./setup.sh
 
-# 3. Configure deployment
+# 3. IMPORTANT: Activate lxd group (REQUIRED!)
+newgrp lxd
+# This activates the group in your current session
+# You need to do this after setup.sh adds you to the lxd group
+
+# 4. Configure deployment
 cp values.yml.example values.yml
 nano values.yml  # Edit database passwords, IPs, etc.
 
-# 4. Deploy Infinibay
+# 5. Deploy containers
 ./run.sh apply
 
-# 5. Check status
+# 6. Provision containers (install software)
+./run.sh provision
+# This installs PostgreSQL, Redis, Node.js, Rust, libvirt
+# Takes 5-10 minutes
+
+# 7. Check status
 ./run.sh status
 
-# 6. Access containers
+# 8. Access containers
 ./run.sh exec backend bash
 ./run.sh exec postgres bash
 ```
 
-**That's it!** The `run.sh` script handles all complexity:
-- Auto-detects infinibay directory (portable across users)
-- Generates LXD profiles with correct paths
-- Ensures data directories exist
-- Handles lxd group permissions automatically
-- Mounts shared code and persistent data directories
+**What happens:**
+- `setup.sh` - Installs LXD, lxd-compose, Go
+- `newgrp lxd` - ⚠️ **REQUIRED** - Activates lxd group permissions
+- `./run.sh apply` - Creates and starts empty containers
+- `./run.sh provision` - Installs all software inside containers
+- Containers have shared `/opt/infinibay` directory (your code)
+- Data persists in `/data` directories even if containers are destroyed
 
 ## Important: Group Membership
 
@@ -114,19 +125,16 @@ groups | grep lxd
 ### Using run.sh (Recommended)
 
 ```bash
-# Start/update all containers
-./run.sh apply
+# Initial setup workflow
+./run.sh apply      # Create and start containers
+./run.sh provision  # Install software (PostgreSQL, Redis, Node.js, etc.)
 
-# Stop and remove all containers
-./run.sh destroy
+# Container management
+./run.sh status     # Check container status
+./run.sh destroy    # Stop and remove all containers
+./run.sh restart    # Destroy and recreate containers
 
-# Restart from scratch
-./run.sh restart
-
-# Check container status
-./run.sh status
-
-# Execute command in container
+# Execute commands in containers
 ./run.sh exec backend bash
 ./run.sh exec postgres psql -U infinibay
 ./run.sh exec frontend npm run dev
@@ -158,27 +166,33 @@ sg lxd -c "lxc snapshot infinibay-backend backup-$(date +%Y%m%d)"
 lxc info infinibay-backend
 ```
 
-## Current Limitations
+## Current Status
 
-⚠️ The current implementation creates basic containers but **does not yet**:
-- Install application dependencies (Node.js, PostgreSQL, etc.)
-- Configure libvirt/KVM access
-- Set up cloud-init provisioning
-- Mount /dev/kvm device
-- Configure networking between containers
+**Implemented and Working:**
+- ✅ Creates 4 Ubuntu containers with resource limits
+- ✅ Mounts shared `/opt/infinibay` directory (your code)
+- ✅ Persistent `/data` directories for each service
+- ✅ Automated provisioning scripts for all containers
+- ✅ PostgreSQL installation and configuration
+- ✅ Redis installation and configuration
+- ✅ Node.js 20.x LTS + npm
+- ✅ Rust toolchain (for libvirt-node native modules)
+- ✅ libvirt + KVM with /dev/kvm device access
+- ✅ Systemd services ready for backend/frontend
+- ✅ Network connectivity between containers
 
-**What it does:**
-- ✅ Creates 4 Ubuntu containers
-- ✅ Sets resource limits (CPU, RAM)
-- ✅ Configures basic networking
+**Still Manual:**
+- ⏳ npm install in backend/frontend
+- ⏳ Database migrations
+- ⏳ Starting Infinibay services
+- ⏳ Application configuration
 
-**Next steps needed:**
-1. Add cloud-init hooks for software installation
-2. Configure device mounts (KVM, libvirt socket)
-3. Add network configuration between containers
-4. Add startup scripts and systemd services
+**After provisioning, you need to:**
+1. Install npm dependencies in backend/frontend
+2. Run database migrations
+3. Configure and start Infinibay services
 
-See [INSTALL.md](./INSTALL.md) for detailed configuration options.
+See [INSTALL.md](./INSTALL.md) for detailed instructions.
 
 ## Troubleshooting
 
