@@ -1,7 +1,24 @@
-# Infinibay Docker Implementation Research
+# Infinibay Containerization Research
 
 **Date**: 2025-11-20
-**Purpose**: Research findings for containerizing Infinibay VDI platform using Docker
+**Purpose**: Research findings for containerizing Infinibay VDI platform
+
+**⚠️ DECISION UPDATE**: After completing this research, **LXD was chosen** over Docker due to superior KVM/libvirt support. See [LXD.md](./LXD.md) for the implementation.
+
+---
+
+## Executive Decision
+
+**Chosen Solution**: **LXD**
+
+**Rationale**:
+- Native KVM device access (no `--privileged` mode)
+- Full systemd support inside containers
+- Designed for nested virtualization
+- YAML-based orchestration via `lxd-compose`
+- Better security isolation for VM workloads
+
+**This document remains as reference** for Docker approach if needed in the future.
 
 ---
 

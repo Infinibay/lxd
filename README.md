@@ -1,16 +1,30 @@
-# Infinibay Docker
+# Infinibay Containerization
 
-Docker containerization for the Infinibay VDI management platform.
+Containerization for the Infinibay VDI management platform using **LXD**.
 
 ## Status
 
-🚧 **In Development** - Research phase completed, implementation in progress.
+✅ **LXD Implementation Complete** - Docker research available as alternative.
 
 ## Quick Links
 
-- **[RESEARCH.md](./RESEARCH.md)** - Comprehensive research findings on Docker best practices, technical challenges, and implementation strategy
+- **[LXD.md](./LXD.md)** - ⭐ Complete LXD deployment guide (START HERE)
+- **[RESEARCH.md](./RESEARCH.md)** - Research findings comparing Docker vs LXD
 - **Project Root**: [../](../)
 - **Installer Reference**: [../installer/](../installer/)
+
+## Why LXD Instead of Docker?
+
+**TL;DR**: LXD has native support for KVM/libvirt, making it ideal for running VMs inside containers.
+
+| Feature | LXD | Docker |
+|---------|-----|--------|
+| **KVM Access** | ✅ Native | ⚠️ Requires `--privileged` |
+| **Nested Virtualization** | ✅ Designed for it | ⚠️ Limited |
+| **Systemd Support** | ✅ Full | ❌ Not recommended |
+| **Configuration** | ✅ YAML (lxd-compose) | ✅ YAML (docker-compose) |
+
+See [RESEARCH.md](./RESEARCH.md) for detailed comparison and Docker implementation option.
 
 ## Overview
 
@@ -84,47 +98,43 @@ All installer parameters can be configured via environment variables:
 
 See [RESEARCH.md](./RESEARCH.md#configurable-parameters) for complete list.
 
-## Planned Structure
+## Structure
 
 ```
 docker/
 ├── README.md                       # This file
-├── RESEARCH.md                     # Detailed research findings
-├── docker-compose.yml              # Production orchestration
-├── docker-compose.dev.yml          # Development overrides
+├── LXD.md                          # Complete LXD deployment guide
+├── RESEARCH.md                     # Research findings (Docker vs LXD)
+├── lxd-compose.yml                 # LXD orchestration (like docker-compose)
 ├── .env.example                    # Environment variable template
-├── Dockerfile.backend              # Backend multi-stage build
-├── Dockerfile.frontend             # Frontend multi-stage build
-├── Dockerfile.infiniservice        # Infiniservice multi-stage build
-├── Dockerfile.libvirt              # Libvirt daemon container
-├── scripts/
-│   ├── docker-entrypoint-backend.sh
-│   ├── docker-entrypoint-frontend.sh
-│   ├── docker-entrypoint-infiniservice.sh
-│   └── healthcheck.sh
-└── config/
-    ├── supervisord.conf            # For multi-process libvirt container
-    └── nginx.conf                  # Optional reverse proxy
+├── setup.sh                        # Automated setup script
+└── profiles/                       # (Future) Custom LXD profiles
 ```
 
-## Future Quick Start (Once Implemented)
+**Note**: This directory was originally named "docker" during research phase, but contains LXD implementation.
+
+## Quick Start
 
 ```bash
 # Clone repository
 git clone https://github.com/infinibay/infinibay.git
 cd infinibay/docker
 
-# Configure environment
-cp .env.example .env
-# Edit .env with your settings
+# Run setup (installs LXD, lxd-compose, creates .env)
+sudo ./setup.sh
 
-# Start services
-docker-compose up -d
+# Review and customize configuration
+nano .env
+
+# Deploy all containers
+lxd-compose up
 
 # Access Infinibay
-# Frontend: http://localhost:3000
-# GraphQL API: http://localhost:4000/graphql
+# Frontend: http://<YOUR_IP>:3000
+# GraphQL API: http://<YOUR_IP>:4000/graphql
 ```
+
+**See [LXD.md](./LXD.md) for detailed installation and usage guide.**
 
 ## Development Workflow (Planned)
 

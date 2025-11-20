@@ -1,0 +1,315 @@
+# Infinibay LXD Compose Configuration
+# Similar to docker-compose.yml but for LXD containers
+#
+# Requirements:
+#   - LXD installed: snap install lxd
+#   - lxd-compose installed: https://mottainaici.github.io/lxd-compose-docs/
+#
+# Usage:
+#   lxd-compose up
+#   lxd-compose down
+
+version: "1"
+
+# Environment variables (can be overridden with .env file)
+env_vars:
+  - INFINIBAY_VERSION=latest
+  - DB_NAME=infinibay
+  - DB_USER=infinibay
+  - BACKEND_PORT=4000
+  - FRONTEND_PORT=3000
+  - REDIS_PORT=6379
+  - POSTGRES_PORT=5432
+
+# Projects define isolated environments
+projects:
+  - name: infinibay
+    description: "Infinibay VDI Management Platform"
+
+# Profiles are reusable configuration templates
+profiles:
+  - name: infinibay-base
+    description: "Base profile for all Infinibay containers"
+    config:
+      # Security settings
+      security.privileged: "false"
+      security.nesting: "true"  # Allow nested containers/VMs
+
+      # Resource limits (adjust based on your hardware)
+      limits.cpu: "2"
+      limits.memory: "2GB"
+
+    devices:
+      # Shared directory for ISOs and data
+      infinibay-data:
+        type: disk
+        path: /data
+        source: /var/lib/infinibay/data
+
+      # Host networking (for simplicity)
+      eth0:
+        type: nic
+        nictype: bridged
+        parent: lxdbr0
+
+  - name: infinibay-kvm
+    description: "Profile for containers needing KVM access"
+    extends: infinibay-base
+    config:
+      security.privileged: "false"  # Don't need full privileged mode
+
+    devices:
+      # KVM device passthrough
+      kvm:
+        type: unix-char
+        path: /dev/kvm
+
+      # Libvirt socket (if using host's libvirt)
+      libvirt-sock:
+        type: disk
+        path: /var/run/libvirt
+        source: /var/run/libvirt
+
+  - name: infinibay-db
+    description: "Profile for database container"
+    extends: infinibay-base
+    config:
+      limits.memory: "4GB"  # More memory for database
+
+    devices:
+      # Persistent database storage
+      postgres-data:
+        type: disk
+        path: /var/lib/postgresql/data
+        source: /var/lib/infinibay/postgres-data
+
+# Container definitions
+containers:
+  # PostgreSQL Database
+  - name: infinibay-postgres
+    project: infinibay
+    image:
+      source: ubuntu/22.04
+      mode: pull
+      server: https://images.linuxcontainers.org
+
+    profiles:
+      - infinibay-db
+
+    config:
+      # Environment variables for PostgreSQL
+      environment:
+        POSTGRES_DB: ${DB_NAME}
+        POSTGRES_USER: ${DB_USER}
+        POSTGRES_PASSWORD: ${DB_PASSWORD}  # Set in .env file
+
+    # Cloud-init configuration
+    cloud_init:
+      user_data: |
+        #cloud-config
+        package_update: true
+        packages:
+          - postgresql
+          - postgresql-contrib
+
+        runcmd:
+          # Configure PostgreSQL to listen on all interfaces
+          - sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '*'/" /etc/postgresql/14/main/postgresql.conf
+          - echo "host all all 0.0.0.0/0 md5" >> /etc/postgresql/14/main/pg_hba.conf
+          - systemctl restart postgresql
+
+  # Redis Cache
+  - name: infinibay-redis
+    project: infinibay
+    image:
+      source: ubuntu/22.04
+      mode: pull
+      server: https://images.linuxcontainers.org
+
+    profiles:
+      - infinibay-base
+
+    config:
+      limits.memory: "1GB"
+
+    cloud_init:
+      user_data: |
+        #cloud-config
+        package_update: true
+        packages:
+          - redis-server
+
+        runcmd:
+          # Configure Redis to listen on all interfaces
+          - sed -i "s/bind 127.0.0.1/bind 0.0.0.0/" /etc/redis/redis.conf
+          - systemctl restart redis-server
+
+  # Backend (Node.js + libvirt-node + infiniservice)
+  - name: infinibay-backend
+    project: infinibay
+    image:
+      source: ubuntu/24.04  # Newer Ubuntu for libvirt support
+      mode: pull
+      server: https://images.linuxcontainers.org
+
+    profiles:
+      - infinibay-kvm  # Includes KVM access
+
+    config:
+      # More resources for backend
+      limits.cpu: "4"
+      limits.memory: "4GB"
+
+      environment:
+        # Database connection
+        DB_HOST: infinibay-postgres
+        DB_PORT: ${POSTGRES_PORT}
+        DB_NAME: ${DB_NAME}
+        DB_USER: ${DB_USER}
+        DB_PASSWORD: ${DB_PASSWORD}
+
+        # Redis connection
+        REDIS_HOST: infinibay-redis
+        REDIS_PORT: ${REDIS_PORT}
+        REDIS_ENABLED: "true"
+
+        # Application settings
+        NODE_ENV: production
+        PORT: ${BACKEND_PORT}
+        HOST_IP: ${HOST_IP}  # Set in .env
+        LIBVIRT_NETWORK_NAME: default
+
+        # Paths
+        INFINIBAY_BASE_DIR: /opt/infinibay
+        INFINIBAY_DATA_DIR: /data
+
+    cloud_init:
+      user_data: |
+        #cloud-config
+        package_update: true
+        packages:
+          # Node.js and build tools
+          - nodejs
+          - npm
+          - build-essential
+          - pkg-config
+
+          # Rust (for libvirt-node compilation)
+          - curl
+
+          # Libvirt and virtualization
+          - qemu-kvm
+          - libvirt-daemon-system
+          - libvirt-clients
+          - libvirt-dev
+
+          # System utilities
+          - git
+          - p7zip-full
+          - btrfs-progs
+
+        runcmd:
+          # Install Rust
+          - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          - source $HOME/.cargo/env
+
+          # Clone Infinibay backend (adjust URL if private)
+          - mkdir -p /opt/infinibay
+          - git clone https://github.com/infinibay/backend.git /opt/infinibay/backend
+          - git clone https://github.com/infinibay/libvirt-node.git /opt/infinibay/libvirt-node
+          - git clone https://github.com/infinibay/infiniservice.git /opt/infinibay/infiniservice
+
+          # Build libvirt-node
+          - cd /opt/infinibay/libvirt-node
+          - cargo build --release
+          - npm pack
+
+          # Build backend
+          - cd /opt/infinibay/backend
+          - npm install
+          - npx prisma generate
+          - npx prisma migrate deploy
+
+          # Build infiniservice
+          - cd /opt/infinibay/infiniservice
+          - cargo build --release
+
+          # Start backend (using systemd)
+          - systemctl enable infinibay-backend
+          - systemctl start infinibay-backend
+
+  # Frontend (Next.js)
+  - name: infinibay-frontend
+    project: infinibay
+    image:
+      source: ubuntu/22.04
+      mode: pull
+      server: https://images.linuxcontainers.org
+
+    profiles:
+      - infinibay-base
+
+    config:
+      limits.cpu: "2"
+      limits.memory: "2GB"
+
+      environment:
+        NODE_ENV: production
+        NEXT_PUBLIC_BACKEND_HOST: http://infinibay-backend:${BACKEND_PORT}
+        NEXT_PUBLIC_GRAPHQL_API_URL: http://infinibay-backend:${BACKEND_PORT}/graphql
+        PORT: ${FRONTEND_PORT}
+
+    cloud_init:
+      user_data: |
+        #cloud-config
+        package_update: true
+        packages:
+          - nodejs
+          - npm
+          - git
+
+        runcmd:
+          # Clone frontend
+          - mkdir -p /opt/infinibay
+          - git clone https://github.com/infinibay/frontend.git /opt/infinibay/frontend
+
+          # Build frontend
+          - cd /opt/infinibay/frontend
+          - npm install
+          - npm run build
+
+          # Start frontend
+          - systemctl enable infinibay-frontend
+          - systemctl start infinibay-frontend
+
+# Networks (LXD managed networks)
+networks:
+  - name: infinibay-net
+    type: bridge
+    config:
+      ipv4.address: 10.10.10.1/24
+      ipv4.nat: "true"
+      ipv6.address: none
+
+# Hooks for automation
+hooks:
+  # Pre-start hook to check prerequisites
+  pre_start:
+    - name: check-kvm
+      commands:
+        - test -c /dev/kvm || echo "Warning: /dev/kvm not found. KVM acceleration disabled."
+
+    - name: create-data-dirs
+      commands:
+        - mkdir -p /var/lib/infinibay/data
+        - mkdir -p /var/lib/infinibay/postgres-data
+
+  # Post-start hook for health checks
+  post_start:
+    - name: health-check
+      commands:
+        - sleep 30  # Wait for services to start
+        - lxc exec infinibay-postgres -- pg_isready || echo "PostgreSQL not ready"
+        - lxc exec infinibay-redis -- redis-cli ping || echo "Redis not ready"
+        - lxc exec infinibay-backend -- curl -f http://localhost:4000/health || echo "Backend not ready"
+        - lxc exec infinibay-frontend -- curl -f http://localhost:3000 || echo "Frontend not ready"
