@@ -43,7 +43,7 @@ lxd/
 **Note:** lxd-compose uses a different structure than docker-compose:
 - Main config: `.lxd-compose.yml`
 - Projects: `envs/*.yml` files
-- Commands: `apply`, `destroy`, `stop` (not `up`/`down`)
+- Commands: `apply infinibay`, `destroy infinibay`, `stop infinibay`
 
 ## Architecture
 
@@ -57,37 +57,62 @@ The deployment creates 4 LXD containers:
 ## Quick Start
 
 ```bash
-# Clone repository
+# 1. Clone repository
 git clone https://github.com/infinibay/infinibay.git
 cd infinibay/lxd
 
-# Run setup (installs LXD, lxd-compose, creates .env)
+# 2. Run setup (installs LXD, lxd-compose, creates .env)
 sudo ./setup.sh
 
-# Review configuration
+# 3. IMPORTANT: If setup added you to lxd group, activate it
+newgrp lxd
+# (or logout/login for permanent effect)
+
+# 4. Review configuration
 nano .env
 
-# Verify project is recognized
+# 5. Verify project is recognized
 lxd-compose project list
 
-# Deploy containers (NOTE: Basic provisioning only for now)
-lxd-compose apply
+# 6. Deploy containers
+lxd-compose apply infinibay
 
-# Check status
+# 7. Check status
 lxc list
+```
+
+## Important: Group Membership
+
+After running `setup.sh`, you may need to activate the `lxd` group:
+
+**Option 1 (Quick - current session only):**
+```bash
+newgrp lxd
+```
+
+**Option 2 (Permanent - requires re-login):**
+```bash
+logout
+# Then login again
+```
+
+**How to check if you're in the group:**
+```bash
+groups | grep lxd
+# Should show 'lxd' in the output
 ```
 
 ## Common Operations
 
 ```bash
 # Deploy/update project
-lxd-compose apply
+lxd-compose apply infinibay
 
-# Destroy project
-lxd-compose destroy
+# Destroy project (removes all containers)
+lxd-compose destroy infinibay
 
-# Stop containers
-lxd-compose stop
+# Stop containers (keeps them, just stops)
+lxd-compose stop infinibay
 
 # View project info
 lxd-compose project list
@@ -100,6 +125,12 @@ lxc exec infinibay-backend -- journalctl -f
 
 # Open shell in container
 lxc exec infinibay-backend -- bash
+
+# Create snapshot
+lxc snapshot infinibay-backend backup-$(date +%Y%m%d)
+
+# List snapshots
+lxc info infinibay-backend
 ```
 
 ## Current Limitations
@@ -111,13 +142,44 @@ lxc exec infinibay-backend -- bash
 - Mount /dev/kvm device
 - Configure networking between containers
 
+**What it does:**
+- ✅ Creates 4 Ubuntu containers
+- ✅ Sets resource limits (CPU, RAM)
+- ✅ Configures basic networking
+
 **Next steps needed:**
 1. Add cloud-init hooks for software installation
 2. Configure device mounts (KVM, libvirt socket)
-3. Add network configuration
+3. Add network configuration between containers
 4. Add startup scripts and systemd services
 
 See [INSTALL.md](./INSTALL.md) for detailed configuration options.
+
+## Troubleshooting
+
+### "No project selected" error
+```bash
+# Make sure you specify the project name
+lxd-compose apply infinibay  # ✓ Correct
+lxd-compose apply             # ✗ Wrong
+```
+
+### "Unable to read the configuration file" error
+```bash
+# You need to be in the lxd group
+newgrp lxd
+# Or logout/login
+```
+
+### "Permission denied" on LXD socket
+```bash
+# Check if you're in lxd group
+groups | grep lxd
+
+# If not, the setup script should have added you
+# Just run:
+newgrp lxd
+```
 
 ## vs Native Installer
 
@@ -127,6 +189,7 @@ See [INSTALL.md](./INSTALL.md) for detailed configuration options.
 | **Provisioning** | Manual for now | ✅ Fully automated |
 | **Isolation** | ✅ Full container isolation | ❌ System-wide |
 | **Rollback** | ✅ Snapshots | ❌ Manual |
+| **Complexity** | Medium | Low |
 
 **Recommendation:** Use the [native installer](../installer/) for production deployments until LXD provisioning is complete.
 
