@@ -1,0 +1,124 @@
+# Infinibay LXD Compose Environment
+# Deploy Infinibay VDI platform using LXD containers
+
+version: "1"
+
+template_engine:
+  engine: "mottainai"
+
+# Load environment variables from .env file
+include_env_files:
+  - ../.env
+
+# Projects
+projects:
+  - name: "infinibay"
+    description: "Infinibay VDI Management Platform"
+
+    # Environment variables for all containers
+    vars:
+      - envs:
+          DB_NAME: "{{ .Values.DB_NAME | default \"infinibay\" }}"
+          DB_USER: "{{ .Values.DB_USER | default \"infinibay\" }}"
+          DB_PASSWORD: "{{ .Values.DB_PASSWORD }}"
+          DB_HOST: "infinibay-postgres"
+          DB_PORT: "{{ .Values.DB_PORT | default \"5432\" }}"
+          REDIS_HOST: "infinibay-redis"
+          REDIS_PORT: "{{ .Values.REDIS_PORT | default \"6379\" }}"
+          REDIS_ENABLED: "{{ .Values.REDIS_ENABLED | default \"true\" }}"
+          HOST_IP: "{{ .Values.HOST_IP }}"
+          BACKEND_PORT: "{{ .Values.BACKEND_PORT | default \"4000\" }}"
+          FRONTEND_PORT: "{{ .Values.FRONTEND_PORT | default \"3000\" }}"
+          ADMIN_EMAIL: "{{ .Values.ADMIN_EMAIL | default \"admin@example.com\" }}"
+          ADMIN_PASSWORD: "{{ .Values.ADMIN_PASSWORD }}"
+          LIBVIRT_NETWORK_NAME: "{{ .Values.LIBVIRT_NETWORK_NAME | default \"default\" }}"
+          INFINIBAY_BASE_DIR: "/opt/infinibay"
+          INFINIBAY_DATA_DIR: "/data"
+
+    # Groups define sets of containers
+    groups:
+      # PostgreSQL Database
+      - name: "database"
+        description: "PostgreSQL Database"
+        connection: "local"
+
+        common_profiles:
+          - default
+
+        # Nodes are the actual containers
+        nodes:
+          - name: "infinibay-postgres"
+            image_source: "ubuntu/22.04"
+            image_remote_server: "images"
+
+            profiles:
+              - default
+
+            config:
+              limits.memory: "{{ .Values.POSTGRES_MEMORY_LIMIT | default \"4GB\" }}"
+              limits.cpu: "{{ .Values.POSTGRES_CPU_LIMIT | default \"2\" }}"
+
+            # TODO: Cloud-init configuration for PostgreSQL
+            # hooks:
+            #   - event: post-node-creation
+            #     commands:
+            #       - apt-get update
+            #       - apt-get install -y postgresql postgresql-contrib
+
+      # Redis Cache
+      - name: "cache"
+        description: "Redis Cache"
+        connection: "local"
+
+        common_profiles:
+          - default
+
+        nodes:
+          - name: "infinibay-redis"
+            image_source: "ubuntu/22.04"
+            image_remote_server: "images"
+
+            config:
+              limits.memory: "{{ .Values.REDIS_MEMORY_LIMIT | default \"1GB\" }}"
+              limits.cpu: "{{ .Values.REDIS_CPU_LIMIT | default \"1\" }}"
+
+      # Backend API
+      - name: "backend"
+        description: "Backend GraphQL API with KVM access"
+        connection: "local"
+
+        common_profiles:
+          - default
+
+        nodes:
+          - name: "infinibay-backend"
+            image_source: "ubuntu/24.04"
+            image_remote_server: "images"
+
+            config:
+              limits.memory: "{{ .Values.BACKEND_MEMORY_LIMIT | default \"4GB\" }}"
+              limits.cpu: "{{ .Values.BACKEND_CPU_LIMIT | default \"4\" }}"
+              security.nesting: "true"
+
+            # TODO: Add KVM device and libvirt socket mounts
+            # devices:
+            #   kvm:
+            #     type: unix-char
+            #     path: /dev/kvm
+
+      # Frontend UI
+      - name: "frontend"
+        description: "Next.js Frontend"
+        connection: "local"
+
+        common_profiles:
+          - default
+
+        nodes:
+          - name: "infinibay-frontend"
+            image_source: "ubuntu/22.04"
+            image_remote_server: "images"
+
+            config:
+              limits.memory: "{{ .Values.FRONTEND_MEMORY_LIMIT | default \"2GB\" }}"
+              limits.cpu: "{{ .Values.FRONTEND_CPU_LIMIT | default \"2\" }}"

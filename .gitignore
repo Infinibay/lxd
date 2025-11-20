@@ -4,3 +4,4 @@
 # Temporary files
 *.tmp
 *.log
+*.backup

@@ -4,11 +4,11 @@ LXD-based containerization for the Infinibay VDI management platform.
 
 ## Status
 
-✅ **Implementation Complete** - Ready for deployment
+⚠️ **Work in Progress** - Basic structure complete, container provisioning in development
 
 ## Quick Links
 
-- **[INSTALL.md](./INSTALL.md)** - ⭐ Complete installation and deployment guide (START HERE)
+- **[INSTALL.md](./INSTALL.md)** - ⭐ Complete installation and deployment guide
 - **Project Root**: [../](../)
 - **Installer Reference**: [../installer/](../installer/)
 
@@ -26,67 +26,33 @@ LXD provides native support for KVM/libvirt, making it ideal for running VMs ins
 
 ## Overview
 
-This directory contains LXD-based containerization for Infinibay, including:
+This directory contains LXD-based containerization for Infinibay using **lxd-compose**.
 
-- `lxd-compose.yml` - Multi-container orchestration configuration
-- `setup.sh` - Automated installation script
-- `.env.example` - Environment configuration template
-- `INSTALL.md` - Complete deployment guide
+**Structure:**
+```
+lxd/
+├── .lxd-compose.yml               # Main lxd-compose config
+├── envs/
+│   └── infinibay.yml              # Infinibay project definition
+├── .env.example                   # Environment template
+├── setup.sh                       # Automated installation
+├── INSTALL.md                     # Complete guide
+└── README.md                      # This file
+```
+
+**Note:** lxd-compose uses a different structure than docker-compose:
+- Main config: `.lxd-compose.yml`
+- Projects: `envs/*.yml` files
+- Commands: `apply`, `destroy`, `stop` (not `up`/`down`)
 
 ## Architecture
-
-Infinibay uses a multi-service architecture:
-
-```
-┌─────────────┐     ┌──────────────┐     ┌───────────────┐
-│  Frontend   │────▶│   Backend    │────▶│  PostgreSQL   │
-│  (Next.js)  │     │  (GraphQL)   │     │               │
-└─────────────┘     └──────────────┘     └───────────────┘
-                            │
-                            ├────────────▶ Redis (cache)
-                            │
-                            ├────────────▶ Infiniservice (RPC)
-                            │
-                            └────────────▶ libvirt (KVM/QEMU)
-```
-
-**Note:** `infiniservice` and `libvirt-node` are not separate containers. They run inside the backend container:
-- **libvirt-node**: Rust library compiled as NAPI-RS addon (imported by backend)
-- **infiniservice**: Rust binary executed by backend via RPC
-
-## LXD Containers
 
 The deployment creates 4 LXD containers:
 
 1. **infinibay-postgres** - PostgreSQL database
-2. **infinibay-redis** - Redis cache (98% performance improvement for firewall rules)
-3. **infinibay-backend** - Node.js GraphQL API + libvirt-node + infiniservice + KVM access
+2. **infinibay-redis** - Redis cache
+3. **infinibay-backend** - Node.js API + libvirt-node + infiniservice + KVM access
 4. **infinibay-frontend** - Next.js web interface
-
-## Configurable Parameters
-
-All installer parameters can be configured via environment variables in `.env`:
-
-| Category | Parameters |
-|----------|------------|
-| **Database** | DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD |
-| **Admin** | ADMIN_EMAIL, ADMIN_PASSWORD |
-| **Network** | HOST_IP, LIBVIRT_NETWORK_NAME, BACKEND_PORT, FRONTEND_PORT |
-| **Application** | INFINIBAY_BASE_DIR, SKIP_ISO_DOWNLOAD, REDIS_ENABLED |
-| **Resources** | BACKEND_CPU_LIMIT, BACKEND_MEMORY_LIMIT, etc. |
-
-See [INSTALL.md](./INSTALL.md) for complete parameter reference.
-
-## Structure
-
-```
-lxd/
-├── README.md                       # This file
-├── INSTALL.md                      # Complete deployment guide
-├── lxd-compose.yml                 # Multi-container orchestration
-├── .env.example                    # Environment configuration template
-└── setup.sh                        # Automated installation script
-```
 
 ## Quick Start
 
@@ -98,86 +64,83 @@ cd infinibay/lxd
 # Run setup (installs LXD, lxd-compose, creates .env)
 sudo ./setup.sh
 
-# Review and customize configuration
+# Review configuration
 nano .env
 
-# Deploy all containers
+# Verify project is recognized
+lxd-compose project list
+
+# Deploy containers (NOTE: Basic provisioning only for now)
 lxd-compose apply
 
-# Access Infinibay
-# Frontend: http://<YOUR_IP>:3000
-# GraphQL API: http://<YOUR_IP>:4000/graphql
+# Check status
+lxc list
 ```
-
-**See [INSTALL.md](./INSTALL.md) for detailed installation and usage guide.**
 
 ## Common Operations
 
 ```bash
-# Start all containers
+# Deploy/update project
 lxd-compose apply
 
-# Stop all containers
+# Destroy project
 lxd-compose destroy
+
+# Stop containers
+lxd-compose stop
+
+# View project info
+lxd-compose project list
 
 # View container status
 lxc list
 
-# View logs
-lxc exec infinibay-backend -- journalctl -u infinibay-backend -f
-
-# Execute migrations
-lxc exec infinibay-backend -- npm run db:migrate
+# View logs (after provisioning)
+lxc exec infinibay-backend -- journalctl -f
 
 # Open shell in container
 lxc exec infinibay-backend -- bash
-
-# Backup database
-lxc exec infinibay-postgres -- su - postgres -c "pg_dump infinibay" > backup.sql
-
-# Create snapshot before updates
-lxc snapshot infinibay-backend backup-$(date +%Y%m%d)
 ```
 
-For complete documentation, see [INSTALL.md](./INSTALL.md).
+## Current Limitations
 
-## Goals
+⚠️ The current implementation creates basic containers but **does not yet**:
+- Install application dependencies (Node.js, PostgreSQL, etc.)
+- Configure libvirt/KVM access
+- Set up cloud-init provisioning
+- Mount /dev/kvm device
+- Configure networking between containers
 
-1. **Simplicity**: Single `lxd-compose apply` deployment
-2. **Portability**: Run on any LXD-compatible host
-3. **Security**: Proper secrets management, no privileged mode required
-4. **Performance**: Native KVM access, minimal overhead (~5%)
-5. **Maintainability**: Snapshots, easy rollback, isolated environments
+**Next steps needed:**
+1. Add cloud-init hooks for software installation
+2. Configure device mounts (KVM, libvirt socket)
+3. Add network configuration
+4. Add startup scripts and systemd services
 
-## Advantages vs Native Installer
+See [INSTALL.md](./INSTALL.md) for detailed configuration options.
 
-| Aspect | LXD | Native Installer |
-|--------|-----|------------------|
-| **Installation Time** | ~15 min | ~20-30 min |
+## vs Native Installer
+
+| Aspect | LXD (Current) | Native Installer |
+|--------|---------------|------------------|
+| **Status** | 🚧 In Development | ✅ Production Ready |
+| **Provisioning** | Manual for now | ✅ Fully automated |
 | **Isolation** | ✅ Full container isolation | ❌ System-wide |
-| **Updates** | ✅ Snapshots before updates | ⚠️ Re-run installer |
-| **Rollback** | ✅ Instant (snapshots) | ❌ Manual |
-| **Portability** | ✅ Export/import containers | ❌ Tied to host |
-| **Resource Usage** | ~5% overhead | 0% (native) |
+| **Rollback** | ✅ Snapshots | ❌ Manual |
+
+**Recommendation:** Use the [native installer](../installer/) for production deployments until LXD provisioning is complete.
 
 ## Contributing
 
-See [INSTALL.md](./INSTALL.md) for development workflows and troubleshooting.
-
-## License
-
-Same as Infinibay project (MIT License).
+See [INSTALL.md](./INSTALL.md) for development workflows.
 
 ## References
 
 - [LXD Documentation](https://documentation.ubuntu.com/lxd/)
-- [lxd-compose](https://mottainaici.github.io/lxd-compose-docs/)
-- [Infinibay Installer](../installer/) - Native installation approach
-- [Backend CLAUDE.md](../backend/CLAUDE.md) - Backend architecture
-- [Frontend CLAUDE.md](../frontend/CLAUDE.md) - Frontend architecture
-- [Project Philosophy](../PHILOSOPHY.md) - Design principles
+- [lxd-compose Documentation](https://mottainaici.github.io/lxd-compose-docs/)
+- [Infinibay Installer](../installer/) - **Recommended for production**
 
 ---
 
 **Last Updated**: 2025-11-20
-**Status**: Production Ready
+**Status**: Basic Structure Complete, Provisioning In Progress
