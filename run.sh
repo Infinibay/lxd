@@ -101,6 +101,15 @@ case "${1:-apply}" in
         "$0" apply
         ;;
 
+    provision)
+        echo -e "${BLUE}=== Provisioning Infinibay Containers ===${NC}"
+        if [[ ! -f "$SCRIPT_DIR/provisioning/provision-all.sh" ]]; then
+            echo -e "${RED}Error: provisioning/provision-all.sh not found${NC}"
+            exit 1
+        fi
+        "$SCRIPT_DIR/provisioning/provision-all.sh"
+        ;;
+
     status)
         echo -e "${BLUE}=== Infinibay Status ===${NC}"
         sg lxd -c "lxc list" | grep infinibay || echo "No Infinibay containers running"
@@ -133,6 +142,7 @@ case "${1:-apply}" in
         echo ""
         echo "Commands:"
         echo "  apply           - Create/start all containers (default)"
+        echo "  provision       - Install software in all containers"
         echo "  destroy         - Stop and remove all containers"
         echo "  restart         - Destroy and recreate all containers"
         echo "  status          - Show container status"
@@ -144,6 +154,7 @@ case "${1:-apply}" in
         echo ""
         echo "Examples:"
         echo "  $0 apply              # Start Infinibay"
+        echo "  $0 provision          # Install PostgreSQL, Redis, Node.js, etc."
         echo "  $0 status             # Check if running"
         echo "  $0 exec backend bash  # Enter backend container"
         echo "  $0 logs postgres      # View postgres logs"
