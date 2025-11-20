@@ -3,7 +3,7 @@
 **Date**: 2025-11-20
 **Purpose**: Research findings for containerizing Infinibay VDI platform
 
-**⚠️ DECISION UPDATE**: After completing this research, **LXD was chosen** over Docker due to superior KVM/libvirt support. See [LXD.md](./LXD.md) for the implementation.
+**⚠️ DECISION UPDATE**: After completing this research, **LXD was chosen** over Docker due to superior KVM/libvirt support. See [INSTALL.md](./INSTALL.md) for the implementation.
 
 ---
 

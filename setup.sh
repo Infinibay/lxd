@@ -96,15 +96,40 @@ install_lxd_compose() {
         snap install go --classic
     fi
 
-    # Install lxd-compose from source
-    export GOPATH=/opt/go
-    mkdir -p "$GOPATH"
-    go install github.com/MottainaiCI/lxd-compose@latest
+    # Note: Cannot use 'go install' due to replace directives in go.mod
+    # Solution: Clone and build manually
+    log_info "Cloning lxd-compose repository..."
 
-    # Create symlink to make it accessible
-    ln -sf "$GOPATH/bin/lxd-compose" /usr/local/bin/lxd-compose
+    TEMP_DIR=$(mktemp -d)
+    ORIG_DIR=$(pwd)
+    cd "$TEMP_DIR"
 
-    log_success "lxd-compose installed"
+    if ! git clone https://github.com/MottainaiCI/lxd-compose.git 2>&1; then
+        log_error "Failed to clone lxd-compose repository"
+        cd "$ORIG_DIR"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+
+    cd lxd-compose
+
+    log_info "Building lxd-compose..."
+    if ! go build -o lxd-compose . 2>&1; then
+        log_error "Failed to build lxd-compose"
+        cd "$ORIG_DIR"
+        rm -rf "$TEMP_DIR"
+        exit 1
+    fi
+
+    # Install binary
+    mv lxd-compose /usr/local/bin/lxd-compose
+    chmod +x /usr/local/bin/lxd-compose
+
+    # Cleanup
+    cd "$ORIG_DIR"
+    rm -rf "$TEMP_DIR"
+
+    log_success "lxd-compose installed successfully"
 }
 
 initialize_lxd() {
@@ -255,7 +280,7 @@ show_next_steps() {
     echo "5. View logs:"
     echo "   ${BLUE}lxc exec infinibay-backend -- journalctl -u infinibay-backend -f${NC}"
     echo ""
-    echo "For troubleshooting, see: ${BLUE}$SCRIPT_DIR/README.md${NC}"
+    echo "For troubleshooting, see: ${BLUE}$SCRIPT_DIR/INSTALL.md${NC}"
     echo ""
 }
 
