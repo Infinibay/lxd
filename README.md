@@ -31,10 +31,13 @@ This directory contains LXD-based containerization for Infinibay using **lxd-com
 **Structure:**
 ```
 lxd/
+├── run.sh                         # Main management script ⭐
 ├── .lxd-compose.yml               # Main lxd-compose config
 ├── envs/
 │   └── infinibay.yml              # Infinibay project definition
-├── .env.example                   # Environment template
+├── profiles/
+│   └── templates/                 # LXD profile templates
+├── values.yml.example             # Configuration template
 ├── setup.sh                       # Automated installation
 ├── INSTALL.md                     # Complete guide
 └── README.md                      # This file
@@ -57,29 +60,33 @@ The deployment creates 4 LXD containers:
 ## Quick Start
 
 ```bash
-# 1. Clone repository
-git clone https://github.com/infinibay/infinibay.git
+# 1. Clone repository and navigate to lxd directory
 cd infinibay/lxd
 
-# 2. Run setup (installs LXD, lxd-compose, creates .env)
+# 2. Run setup (installs LXD, lxd-compose, Go)
 sudo ./setup.sh
 
-# 3. IMPORTANT: If setup added you to lxd group, activate it
-newgrp lxd
-# (or logout/login for permanent effect)
+# 3. Configure deployment
+cp values.yml.example values.yml
+nano values.yml  # Edit database passwords, IPs, etc.
 
-# 4. Review configuration
-nano .env
+# 4. Deploy Infinibay
+./run.sh apply
 
-# 5. Verify project is recognized
-lxd-compose project list
+# 5. Check status
+./run.sh status
 
-# 6. Deploy containers
-lxd-compose apply infinibay
-
-# 7. Check status
-lxc list
+# 6. Access containers
+./run.sh exec backend bash
+./run.sh exec postgres bash
 ```
+
+**That's it!** The `run.sh` script handles all complexity:
+- Auto-detects infinibay directory (portable across users)
+- Generates LXD profiles with correct paths
+- Ensures data directories exist
+- Handles lxd group permissions automatically
+- Mounts shared code and persistent data directories
 
 ## Important: Group Membership
 
@@ -104,30 +111,48 @@ groups | grep lxd
 
 ## Common Operations
 
+### Using run.sh (Recommended)
+
 ```bash
-# Deploy/update project
-lxd-compose apply infinibay
+# Start/update all containers
+./run.sh apply
 
-# Destroy project (removes all containers)
-lxd-compose destroy infinibay
+# Stop and remove all containers
+./run.sh destroy
 
-# Stop containers (keeps them, just stops)
-lxd-compose stop infinibay
+# Restart from scratch
+./run.sh restart
 
-# View project info
-lxd-compose project list
+# Check container status
+./run.sh status
 
+# Execute command in container
+./run.sh exec backend bash
+./run.sh exec postgres psql -U infinibay
+./run.sh exec frontend npm run dev
+
+# Follow container logs
+./run.sh logs backend
+./run.sh logs postgres
+
+# Update profiles only (after modifying templates)
+./run.sh setup-profiles
+
+# Show help
+./run.sh help
+```
+
+### Direct LXC Commands
+
+```bash
 # View container status
-lxc list
+sg lxd -c "lxc list"
 
-# View logs (after provisioning)
-lxc exec infinibay-backend -- journalctl -f
-
-# Open shell in container
-lxc exec infinibay-backend -- bash
+# Execute commands
+sg lxd -c "lxc exec infinibay-backend -- bash"
 
 # Create snapshot
-lxc snapshot infinibay-backend backup-$(date +%Y%m%d)
+sg lxd -c "lxc snapshot infinibay-backend backup-$(date +%Y%m%d)"
 
 # List snapshots
 lxc info infinibay-backend
