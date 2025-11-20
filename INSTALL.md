@@ -156,7 +156,7 @@ LIBVIRT_NETWORK_NAME=default
 cd ~/infinibay/docker
 
 # Deploy all containers
-lxd-compose up
+lxd-compose apply
 ```
 
 **What happens**:
@@ -221,10 +221,10 @@ Open your browser:
 
 ```bash
 # Stop all Infinibay containers
-lxd-compose down
+lxd-compose destroy
 
 # Start all containers
-lxd-compose up
+lxd-compose apply
 
 # Restart a specific container
 lxc restart infinibay-backend
@@ -367,7 +367,7 @@ lxc exec infinibay-redis -- ss -tlnp | grep 6379
 
 ```bash
 # Stop and delete all containers
-lxd-compose down
+lxd-compose destroy
 lxc delete infinibay-backend infinibay-frontend infinibay-postgres infinibay-redis --force
 
 # Delete project
@@ -378,7 +378,7 @@ sudo rm -rf /var/lib/infinibay/
 
 # Start fresh
 ./setup.sh
-lxd-compose up
+lxd-compose apply
 ```
 
 ---
@@ -517,7 +517,7 @@ sudo systemctl disable infinibay-backend infinibay-frontend
 ```bash
 cd ~/infinibay/docker
 sudo ./setup.sh
-lxd-compose up
+lxd-compose apply
 ```
 
 ### Step 4: Restore Data
@@ -562,7 +562,7 @@ tar -xzf infinibay-data-backup.tar.gz -C /var/lib/infinibay/data/
 lxc project create infinibay-dev
 lxc project switch infinibay-dev
 # Edit lxd-compose.yml to use different ports
-lxd-compose up
+lxd-compose apply
 ```
 
 ### Q: How do I upgrade LXD?

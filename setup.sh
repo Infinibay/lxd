@@ -268,7 +268,7 @@ show_next_steps() {
     echo ""
     echo "2. Deploy Infinibay containers:"
     echo -e "   ${BLUE}cd $SCRIPT_DIR${NC}"
-    echo -e "   ${BLUE}lxd-compose up${NC}"
+    echo -e "   ${BLUE}lxd-compose apply${NC}"
     echo ""
     echo "3. Check container status:"
     echo -e "   ${BLUE}lxc list${NC}"

@@ -102,7 +102,7 @@ sudo ./setup.sh
 nano .env
 
 # Deploy all containers
-lxd-compose up
+lxd-compose apply
 
 # Access Infinibay
 # Frontend: http://<YOUR_IP>:3000
@@ -115,10 +115,10 @@ lxd-compose up
 
 ```bash
 # Start all containers
-lxd-compose up
+lxd-compose apply
 
 # Stop all containers
-lxd-compose down
+lxd-compose destroy
 
 # View container status
 lxc list
@@ -143,7 +143,7 @@ For complete documentation, see [INSTALL.md](./INSTALL.md).
 
 ## Goals
 
-1. **Simplicity**: Single `lxd-compose up` deployment
+1. **Simplicity**: Single `lxd-compose apply` deployment
 2. **Portability**: Run on any LXD-compatible host
 3. **Security**: Proper secrets management, no privileged mode required
 4. **Performance**: Native KVM access, minimal overhead (~5%)
