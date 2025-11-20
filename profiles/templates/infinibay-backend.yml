@@ -4,7 +4,7 @@ config: {}
 devices:
   backend-data:
     type: disk
-    source: /home/andres/infinibay/data/backend
+    source: {{INFINIBAY_DIR}}/data/backend
     path: /data
   kvm:
     type: unix-char

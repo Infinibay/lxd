@@ -4,5 +4,5 @@ config: {}
 devices:
   postgres-data:
     type: disk
-    source: /home/andres/infinibay/data/postgres
+    source: {{INFINIBAY_DIR}}/data/postgres
     path: /data

@@ -4,5 +4,5 @@ config: {}
 devices:
   frontend-data:
     type: disk
-    source: /home/andres/infinibay/data/frontend
+    source: {{INFINIBAY_DIR}}/data/frontend
     path: /data

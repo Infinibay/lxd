@@ -6,3 +6,4 @@ values.yml
 *.tmp
 *.log
 *.backup
+profiles/generated/

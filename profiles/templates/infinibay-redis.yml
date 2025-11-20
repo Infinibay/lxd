@@ -4,5 +4,5 @@ config: {}
 devices:
   redis-data:
     type: disk
-    source: /home/andres/infinibay/data/redis
+    source: {{INFINIBAY_DIR}}/data/redis
     path: /data

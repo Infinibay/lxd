@@ -4,5 +4,5 @@ config: {}
 devices:
   infinibay-code:
     type: disk
-    source: /home/andres/infinibay
+    source: {{INFINIBAY_DIR}}
     path: /opt/infinibay
