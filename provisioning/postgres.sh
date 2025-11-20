@@ -23,6 +23,8 @@ PG_HBA="/etc/postgresql/$PG_VERSION/main/pg_hba.conf"
 
 # Configure PostgreSQL to use /data
 echo "Configuring data directory..."
+# Fix /data permissions (mounted from host as nobody:nogroup)
+chmod 777 /data
 mkdir -p /data/pgdata
 chown -R postgres:postgres /data/pgdata
 chmod 700 /data/pgdata

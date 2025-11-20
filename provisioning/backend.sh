@@ -64,8 +64,9 @@ systemctl enable libvirtd
 systemctl start libvirtd
 
 # Configure libvirt to use /data for images
-mkdir -p /data/libvirt/images
-mkdir -p /data/libvirt/networks
+# Fix /data permissions (mounted from host as nobody:nogroup)
+chmod 777 /data
+mkdir -p /data/libvirt/images /data/libvirt/networks
 chown -R libvirt-qemu:kvm /data/libvirt
 chmod 755 /data/libvirt
 
@@ -99,10 +100,9 @@ else
 fi
 
 # Set up directories
-mkdir -p /data/logs
-mkdir -p /data/uploads
-mkdir -p /data/tmp
-chown -R infinibay:infinibay /data
+# Note: /data permissions already fixed earlier for libvirt
+mkdir -p /data/logs /data/uploads /data/tmp
+chown -R infinibay:infinibay /data/logs /data/uploads /data/tmp
 
 # Create systemd service for backend
 cat > /etc/systemd/system/infinibay-backend.service << 'EOF'

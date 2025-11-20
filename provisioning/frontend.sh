@@ -31,8 +31,9 @@ if ! id -u infinibay > /dev/null 2>&1; then
 fi
 
 # Set up directories
-mkdir -p /data/logs
-mkdir -p /data/cache
+# Fix /data permissions (mounted from host as nobody:nogroup)
+chmod 777 /data
+mkdir -p /data/logs /data/cache
 chown -R infinibay:infinibay /data
 
 # Install PM2 for process management

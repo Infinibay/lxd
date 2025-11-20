@@ -18,6 +18,8 @@ systemctl stop redis-server
 
 # Configure Redis to use /data
 echo "Configuring Redis..."
+# Fix /data permissions (mounted from host as nobody:nogroup)
+chmod 777 /data
 mkdir -p /data/redis
 chown redis:redis /data/redis
 chmod 750 /data/redis
