@@ -8,6 +8,9 @@ logging:
   level: "info"
   runtime_cmds_output: true
 
+# Default render values file
+render_default_file: values.yml
+
 # Define the directories list where load environments
 env_dirs:
   - ./envs

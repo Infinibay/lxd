@@ -1,0 +1,27 @@
+#!/bin/bash
+# Infinibay LXD Management Wrapper
+# Makes it easier to run lxd-compose commands
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Change to script directory
+cd "$(dirname "$0")"
+
+# Check if values.yml exists
+if [[ ! -f values.yml ]]; then
+    echo -e "${YELLOW}Warning: values.yml not found${NC}"
+    echo -e "Copy values.yml.example to values.yml and customize it:"
+    echo -e "   ${BLUE}cp values.yml.example values.yml${NC}"
+    echo -e "   ${BLUE}nano values.yml${NC}"
+    exit 1
+fi
+
+# Run lxd-compose with proper environment
+exec sg lxd -c "LXD_DIR=/var/snap/lxd/common/lxd lxd-compose $*"

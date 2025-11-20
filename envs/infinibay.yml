@@ -6,10 +6,6 @@ version: "1"
 template_engine:
   engine: "mottainai"
 
-# Load environment variables from .env file
-include_env_files:
-  - ../.env
-
 # Projects
 projects:
   - name: "infinibay"
@@ -18,20 +14,20 @@ projects:
     # Environment variables for all containers
     vars:
       - envs:
-          DB_NAME: "{{ .Values.DB_NAME | default \"infinibay\" }}"
-          DB_USER: "{{ .Values.DB_USER | default \"infinibay\" }}"
+          DB_NAME: "{{ .Values.DB_NAME }}"
+          DB_USER: "{{ .Values.DB_USER }}"
           DB_PASSWORD: "{{ .Values.DB_PASSWORD }}"
           DB_HOST: "infinibay-postgres"
-          DB_PORT: "{{ .Values.DB_PORT | default \"5432\" }}"
+          DB_PORT: "{{ .Values.DB_PORT }}"
           REDIS_HOST: "infinibay-redis"
-          REDIS_PORT: "{{ .Values.REDIS_PORT | default \"6379\" }}"
-          REDIS_ENABLED: "{{ .Values.REDIS_ENABLED | default \"true\" }}"
+          REDIS_PORT: "{{ .Values.REDIS_PORT }}"
+          REDIS_ENABLED: "{{ .Values.REDIS_ENABLED }}"
           HOST_IP: "{{ .Values.HOST_IP }}"
-          BACKEND_PORT: "{{ .Values.BACKEND_PORT | default \"4000\" }}"
-          FRONTEND_PORT: "{{ .Values.FRONTEND_PORT | default \"3000\" }}"
-          ADMIN_EMAIL: "{{ .Values.ADMIN_EMAIL | default \"admin@example.com\" }}"
+          BACKEND_PORT: "{{ .Values.BACKEND_PORT }}"
+          FRONTEND_PORT: "{{ .Values.FRONTEND_PORT }}"
+          ADMIN_EMAIL: "{{ .Values.ADMIN_EMAIL }}"
           ADMIN_PASSWORD: "{{ .Values.ADMIN_PASSWORD }}"
-          LIBVIRT_NETWORK_NAME: "{{ .Values.LIBVIRT_NETWORK_NAME | default \"default\" }}"
+          LIBVIRT_NETWORK_NAME: "{{ .Values.LIBVIRT_NETWORK_NAME }}"
           INFINIBAY_BASE_DIR: "/opt/infinibay"
           INFINIBAY_DATA_DIR: "/data"
 
@@ -48,15 +44,12 @@ projects:
         # Nodes are the actual containers
         nodes:
           - name: "infinibay-postgres"
-            image_source: "ubuntu/22.04"
-            image_remote_server: "images"
-
-            profiles:
-              - default
+            image_source: "22.04"
+            image_remote_server: "ubuntu"
 
             config:
-              limits.memory: "{{ .Values.POSTGRES_MEMORY_LIMIT | default \"4GB\" }}"
-              limits.cpu: "{{ .Values.POSTGRES_CPU_LIMIT | default \"2\" }}"
+              limits.memory: "{{ .Values.POSTGRES_MEMORY_LIMIT }}"
+              limits.cpu: 2
 
             # TODO: Cloud-init configuration for PostgreSQL
             # hooks:
@@ -75,12 +68,12 @@ projects:
 
         nodes:
           - name: "infinibay-redis"
-            image_source: "ubuntu/22.04"
-            image_remote_server: "images"
+            image_source: "22.04"
+            image_remote_server: "ubuntu"
 
             config:
-              limits.memory: "{{ .Values.REDIS_MEMORY_LIMIT | default \"1GB\" }}"
-              limits.cpu: "{{ .Values.REDIS_CPU_LIMIT | default \"1\" }}"
+              limits.memory: "{{ .Values.REDIS_MEMORY_LIMIT }}"
+              limits.cpu: 1
 
       # Backend API
       - name: "backend"
@@ -92,12 +85,12 @@ projects:
 
         nodes:
           - name: "infinibay-backend"
-            image_source: "ubuntu/24.04"
-            image_remote_server: "images"
+            image_source: "24.04"
+            image_remote_server: "ubuntu"
 
             config:
-              limits.memory: "{{ .Values.BACKEND_MEMORY_LIMIT | default \"4GB\" }}"
-              limits.cpu: "{{ .Values.BACKEND_CPU_LIMIT | default \"4\" }}"
+              limits.memory: "{{ .Values.BACKEND_MEMORY_LIMIT }}"
+              limits.cpu: 4
               security.nesting: "true"
 
             # TODO: Add KVM device and libvirt socket mounts
@@ -116,9 +109,9 @@ projects:
 
         nodes:
           - name: "infinibay-frontend"
-            image_source: "ubuntu/22.04"
-            image_remote_server: "images"
+            image_source: "22.04"
+            image_remote_server: "ubuntu"
 
             config:
-              limits.memory: "{{ .Values.FRONTEND_MEMORY_LIMIT | default \"2GB\" }}"
-              limits.cpu: "{{ .Values.FRONTEND_CPU_LIMIT | default \"2\" }}"
+              limits.memory: "{{ .Values.FRONTEND_MEMORY_LIMIT }}"
+              limits.cpu: 2
