@@ -65,19 +65,22 @@ install_lxd() {
 
     if command -v lxc &>/dev/null; then
         log_success "LXD already installed: $(lxc version)"
-        return 0
+    else
+        log_info "Installing LXD via snap..."
+        snap install lxd
+        log_success "LXD installed successfully"
     fi
 
-    log_info "Installing LXD via snap..."
-    snap install lxd
-
-    # Add current user to lxd group (if not root)
+    # Ensure current user is in lxd group
     if [[ -n "${SUDO_USER:-}" ]]; then
-        usermod -aG lxd "$SUDO_USER"
-        log_info "Added $SUDO_USER to lxd group. You may need to log out and back in."
+        if ! groups "$SUDO_USER" | grep -q "\blxd\b"; then
+            log_info "Adding $SUDO_USER to lxd group..."
+            usermod -aG lxd "$SUDO_USER"
+            log_warning "User added to lxd group. You MUST run 'newgrp lxd' or logout/login for changes to take effect!"
+        else
+            log_success "User $SUDO_USER already in lxd group"
+        fi
     fi
-
-    log_success "LXD installed successfully"
 }
 
 install_lxd_compose() {
@@ -191,6 +194,63 @@ create_data_directories() {
     log_success "Data directories created"
 }
 
+configure_lxc_for_user() {
+    log_info "Configuring LXC for user..."
+
+    if [[ -z "${SUDO_USER:-}" ]]; then
+        log_warning "Cannot determine user. Skipping LXC configuration."
+        return 0
+    fi
+
+    local USER_HOME=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    local LXC_CONFIG_DIR="$USER_HOME/.config/lxc"
+    local LXC_CONFIG_FILE="$LXC_CONFIG_DIR/config.yml"
+
+    # Create config directory
+    if [[ ! -d "$LXC_CONFIG_DIR" ]]; then
+        mkdir -p "$LXC_CONFIG_DIR"
+        chown "$SUDO_USER:$SUDO_USER" "$LXC_CONFIG_DIR"
+        chown "$SUDO_USER:$SUDO_USER" "$USER_HOME/.config"
+    fi
+
+    # Create config file if it doesn't exist
+    if [[ ! -f "$LXC_CONFIG_FILE" ]]; then
+        cat > "$LXC_CONFIG_FILE" << 'EOF'
+default-remote: local
+remotes:
+  images:
+    addr: https://images.lxd.canonical.com
+    protocol: simplestreams
+    public: true
+  local:
+    addr: unix://
+    protocol: lxd
+    public: false
+  ubuntu:
+    addr: https://cloud-images.ubuntu.com/releases/
+    protocol: simplestreams
+    public: true
+  ubuntu-daily:
+    addr: https://cloud-images.ubuntu.com/daily/
+    protocol: simplestreams
+    public: true
+  ubuntu-minimal:
+    addr: https://cloud-images.ubuntu.com/minimal/releases/
+    protocol: simplestreams
+    public: true
+  ubuntu-minimal-daily:
+    addr: https://cloud-images.ubuntu.com/minimal/daily/
+    protocol: simplestreams
+    public: true
+aliases: {}
+EOF
+        chown "$SUDO_USER:$SUDO_USER" "$LXC_CONFIG_FILE"
+        log_success "Created LXC config file: $LXC_CONFIG_FILE"
+    else
+        log_success "LXC config file already exists"
+    fi
+}
+
 check_env_file() {
     log_info "Checking environment configuration..."
 
@@ -261,6 +321,30 @@ show_next_steps() {
     log_success "Setup completed successfully!"
     echo "=============================================="
     echo ""
+
+    # Check if user needs to activate lxd group
+    local NEEDS_NEWGRP=false
+    if [[ -n "${SUDO_USER:-}" ]]; then
+        if ! sudo -u "$SUDO_USER" groups | grep -q "\blxd\b"; then
+            NEEDS_NEWGRP=true
+        fi
+    fi
+
+    if [[ "$NEEDS_NEWGRP" == "true" ]]; then
+        echo -e "${YELLOW}⚠️  IMPORTANT: User was added to lxd group${NC}"
+        echo ""
+        echo "Before running lxd-compose, you MUST activate the group change:"
+        echo ""
+        echo "  Option 1 (Quick - in current session):"
+        echo -e "    ${BLUE}newgrp lxd${NC}"
+        echo ""
+        echo "  Option 2 (Permanent - requires re-login):"
+        echo -e "    ${BLUE}logout and login again${NC}"
+        echo ""
+        echo "Then continue with the steps below:"
+        echo ""
+    fi
+
     echo "Next steps:"
     echo ""
     echo "1. Review and customize your configuration:"
@@ -268,7 +352,7 @@ show_next_steps() {
     echo ""
     echo "2. Deploy Infinibay containers:"
     echo -e "   ${BLUE}cd $SCRIPT_DIR${NC}"
-    echo -e "   ${BLUE}lxd-compose apply${NC}"
+    echo -e "   ${BLUE}lxd-compose apply infinibay${NC}"
     echo ""
     echo "3. Check container status:"
     echo -e "   ${BLUE}lxc list${NC}"
@@ -278,7 +362,7 @@ show_next_steps() {
     echo -e "   GraphQL:   ${GREEN}http://$(grep HOST_IP= "$ENV_FILE" | cut -d= -f2):4000/graphql${NC}"
     echo ""
     echo "5. View logs:"
-    echo -e "   ${BLUE}lxc exec infinibay-backend -- journalctl -u infinibay-backend -f${NC}"
+    echo -e "   ${BLUE}lxc exec infinibay-backend -- journalctl -f${NC}"
     echo ""
     echo -e "For troubleshooting, see: ${BLUE}$SCRIPT_DIR/INSTALL.md${NC}"
     echo ""
@@ -298,6 +382,7 @@ main() {
     initialize_lxd
     install_lxd_compose
     create_data_directories
+    configure_lxc_for_user
 
     if ! check_env_file; then
         log_warning "Setup paused. Please configure .env file and run this script again."
