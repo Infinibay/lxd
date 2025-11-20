@@ -9,7 +9,6 @@ LXD-based containerization for the Infinibay VDI management platform.
 ## Quick Links
 
 - **[INSTALL.md](./INSTALL.md)** - ⭐ Complete installation and deployment guide (START HERE)
-- **[RESEARCH.md](./RESEARCH.md)** - Technical research and decisions
 - **Project Root**: [../](../)
 - **Installer Reference**: [../installer/](../installer/)
 
@@ -18,13 +17,12 @@ LXD-based containerization for the Infinibay VDI management platform.
 LXD provides native support for KVM/libvirt, making it ideal for running VMs inside containers without privileged mode or complex workarounds.
 
 **Key advantages:**
-- ✅ Native KVM device access
+- ✅ Native KVM device access - no `--privileged` mode needed
 - ✅ Full systemd support inside containers
 - ✅ Designed for nested virtualization
 - ✅ YAML-based configuration (lxd-compose)
 - ✅ Better security isolation for VM workloads
-
-See [RESEARCH.md](./RESEARCH.md) for technical details and decision rationale.
+- ✅ Minimal performance overhead (~5%)
 
 ## Overview
 
@@ -85,7 +83,6 @@ See [INSTALL.md](./INSTALL.md) for complete parameter reference.
 lxd/
 ├── README.md                       # This file
 ├── INSTALL.md                      # Complete deployment guide
-├── RESEARCH.md                     # Technical research and decisions
 ├── lxd-compose.yml                 # Multi-container orchestration
 ├── .env.example                    # Environment configuration template
 └── setup.sh                        # Automated installation script

@@ -1,0 +1,6 @@
+# Environment variables (contains passwords)
+.env
+
+# Temporary files
+*.tmp
+*.log
