@@ -107,15 +107,13 @@ fi
 chmod 755 /opt/infinibay/frontend
 echo "Frontend directory permissions: $(ls -ld /opt/infinibay/frontend)"
 
-# Get backend container IP dynamically
-echo "Detecting backend container IP..."
-BACKEND_IP=$(lxc list infinibay-backend --format json | grep -oP '"address":"10\.[^"]+' | head -1 | cut -d'"' -f4)
-
+# Use BACKEND_IP environment variable passed from provisioning script
+# If not set, fallback to hostname
 if [ -z "$BACKEND_IP" ]; then
-    echo "⚠ WARNING: Could not detect backend IP, using hostname fallback"
+    echo "⚠ WARNING: BACKEND_IP not provided, using hostname fallback"
     BACKEND_IP="infinibay-backend"
 else
-    echo "✓ Detected backend IP: $BACKEND_IP"
+    echo "✓ Using backend IP: $BACKEND_IP"
 fi
 
 # Create frontend .env file with LXD container networking
