@@ -68,15 +68,20 @@ echo -e "${YELLOW}Step 3/4: Provisioning Backend...${NC}"
 provision_container "infinibay-backend" "backend.sh"
 
 echo -e "${YELLOW}Step 4/4: Provisioning Frontend...${NC}"
-# Detect backend IP before provisioning frontend
-BACKEND_IP=$(lxc list infinibay-backend --format json | grep -oP '"address":"10\.[^"]+' | head -1 | cut -d'"' -f4)
-if [ -z "$BACKEND_IP" ]; then
-    echo -e "${YELLOW}Warning: Could not detect backend IP, using hostname${NC}"
-    BACKEND_IP="infinibay-backend"
-else
-    echo -e "${GREEN}Detected backend IP: ${BACKEND_IP}${NC}"
+# Detect HOST IP (not container IP) since ports are proxied to host
+# Get the IP of the default route interface (usually the main network interface)
+HOST_IP=$(ip route get 1.1.1.1 | grep -oP 'src \K[\d.]+')
+if [ -z "$HOST_IP" ]; then
+    echo -e "${YELLOW}Warning: Could not detect host IP, trying alternative method${NC}"
+    HOST_IP=$(hostname -I | awk '{print $1}')
 fi
-provision_container "infinibay-frontend" "frontend.sh" "BACKEND_IP=$BACKEND_IP"
+if [ -z "$HOST_IP" ]; then
+    echo -e "${RED}Error: Could not detect host IP${NC}"
+    exit 1
+fi
+echo -e "${GREEN}Detected host IP: ${HOST_IP}${NC}"
+echo -e "${BLUE}Backend will be accessible at: http://${HOST_IP}:4000${NC}"
+provision_container "infinibay-frontend" "frontend.sh" "BACKEND_IP=$HOST_IP"
 
 echo ""
 echo -e "${BLUE}=== Verifying Services ===${NC}"
