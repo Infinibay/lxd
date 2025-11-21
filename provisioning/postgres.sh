@@ -23,8 +23,7 @@ PG_HBA="/etc/postgresql/$PG_VERSION/main/pg_hba.conf"
 
 # Configure PostgreSQL to use /data
 echo "Configuring data directory..."
-# Fix /data permissions (mounted from host as nobody:nogroup)
-chmod 777 /data
+# Create subdirectory for PostgreSQL data
 mkdir -p /data/pgdata
 chown -R postgres:postgres /data/pgdata
 chmod 700 /data/pgdata
@@ -55,10 +54,18 @@ systemctl enable postgresql
 # Wait for PostgreSQL to be ready
 sleep 3
 
-# Create Infinibay database and user
+# Create Infinibay database and user (if they don't exist)
 echo "Creating Infinibay database and user..."
-su - postgres -c "psql -c \"CREATE USER infinibay WITH PASSWORD 'changeme';\""
-su - postgres -c "psql -c \"CREATE DATABASE infinibay OWNER infinibay;\""
+
+# Create user only if it doesn't exist
+su - postgres -c "psql -tc \"SELECT 1 FROM pg_user WHERE usename = 'infinibay'\" | grep -q 1" || \
+    su - postgres -c "psql -c \"CREATE USER infinibay WITH PASSWORD 'changeme';\""
+
+# Create database only if it doesn't exist
+su - postgres -c "psql -tc \"SELECT 1 FROM pg_database WHERE datname = 'infinibay'\" | grep -q 1" || \
+    su - postgres -c "psql -c \"CREATE DATABASE infinibay OWNER infinibay;\""
+
+# Grant privileges (safe to run even if already granted)
 su - postgres -c "psql -c \"GRANT ALL PRIVILEGES ON DATABASE infinibay TO infinibay;\""
 
 echo "PostgreSQL provisioning completed!"

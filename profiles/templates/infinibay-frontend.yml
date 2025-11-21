@@ -6,3 +6,8 @@ devices:
     type: disk
     source: {{INFINIBAY_DIR}}/data/frontend
     path: /data
+  http-proxy:
+    type: proxy
+    listen: tcp:0.0.0.0:3000
+    connect: tcp:127.0.0.1:3000
+    bind: host

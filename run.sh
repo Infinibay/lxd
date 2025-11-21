@@ -67,6 +67,9 @@ setup_profiles() {
 ensure_data_dirs() {
     echo -e "${BLUE}Ensuring data directories exist...${NC}"
     mkdir -p "$INFINIBAY_DIR/data"/{postgres,redis,backend,frontend}
+    # Set permissions so containers can write to these directories
+    # LXD uses user namespaces, so we need to make directories writable
+    chmod 777 "$INFINIBAY_DIR/data"/{postgres,redis,backend,frontend}
     echo -e "${GREEN}Data directories ready${NC}"
 }
 

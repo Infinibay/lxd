@@ -27,6 +27,7 @@ projects:
           FRONTEND_PORT: "{{ .Values.FRONTEND_PORT }}"
           ADMIN_EMAIL: "{{ .Values.ADMIN_EMAIL }}"
           ADMIN_PASSWORD: "{{ .Values.ADMIN_PASSWORD }}"
+          TOKENKEY: "{{ .Values.TOKENKEY }}"
           LIBVIRT_NETWORK_NAME: "{{ .Values.LIBVIRT_NETWORK_NAME }}"
           INFINIBAY_BASE_DIR: "/opt/infinibay"
           INFINIBAY_DATA_DIR: "/data"
