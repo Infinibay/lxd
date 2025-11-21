@@ -67,6 +67,23 @@ provision_container "infinibay-redis" "redis.sh"
 echo -e "${YELLOW}Step 3/4: Provisioning Backend...${NC}"
 provision_container "infinibay-backend" "backend.sh"
 
+# Copy wallpapers to backend container after provisioning
+echo -e "${BLUE}Copying wallpapers to backend container...${NC}"
+INFINIBAY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [ -d "$INFINIBAY_DIR/wallpapers" ]; then
+    # Push each wallpaper file individually
+    for wallpaper in "$INFINIBAY_DIR/wallpapers"/*; do
+        if [ -f "$wallpaper" ]; then
+            filename=$(basename "$wallpaper")
+            lxc file push "$wallpaper" infinibay-backend/opt/infinibay/wallpapers/"$filename"
+        fi
+    done
+    WALLPAPER_COUNT=$(ls -1 "$INFINIBAY_DIR/wallpapers" | wc -l)
+    echo -e "${GREEN}✓ Copied $WALLPAPER_COUNT wallpapers to backend${NC}"
+else
+    echo -e "${YELLOW}⚠ Warning: Wallpapers directory not found at $INFINIBAY_DIR/wallpapers${NC}"
+fi
+
 echo -e "${YELLOW}Step 4/4: Provisioning Frontend...${NC}"
 # Detect HOST IP (not container IP) since ports are proxied to host
 # Get the IP of the default route interface (usually the main network interface)

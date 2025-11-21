@@ -145,6 +145,12 @@ fi
 mkdir -p /data/logs /data/uploads /data/tmp
 chown -R infinibay:infinibay /data/logs /data/uploads /data/tmp
 
+# Set up wallpapers directory
+echo "Setting up wallpapers directory..."
+mkdir -p /opt/infinibay/wallpapers
+chmod 755 /opt/infinibay/wallpapers
+echo "✓ Wallpapers directory created"
+
 # Create systemd service for backend
 cat > /etc/systemd/system/infinibay-backend.service << 'EOF'
 [Unit]
