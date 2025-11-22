@@ -6,6 +6,9 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Source the provisioning state library
+source "${SCRIPT_DIR}/../lib/provisioning-state.sh"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -24,23 +27,37 @@ provision_container() {
     local container=$1
     local script=$2
     shift 2
-    local env_vars="$@"
+    local env_vars=("$@")  # Capture remaining arguments as array for safe handling
 
     echo -e "${BLUE}Provisioning ${container}...${NC}"
+
+    # Check if already provisioned
+    if is_provisioned "$container"; then
+        echo -e "${GREEN}✓ ${container} already provisioned, skipping${NC}"
+        echo ""
+        return 0
+    fi
+
+    # Copy lib directory to container
+    lxc file push -r "$SCRIPT_DIR/../lib" "$container/"
 
     # Copy script to container
     lxc file push "$SCRIPT_DIR/$script" "$container/tmp/provision.sh"
 
     # Make it executable and run it with environment variables
     lxc exec "$container" -- chmod +x /tmp/provision.sh
-    if [ -n "$env_vars" ]; then
-        lxc exec "$container" -- env $env_vars /tmp/provision.sh
+    if [ ${#env_vars[@]} -gt 0 ]; then
+        # Pass env vars as separate quoted arguments to preserve spaces and special chars
+        lxc exec "$container" -- env "${env_vars[@]}" /tmp/provision.sh
     else
         lxc exec "$container" -- /tmp/provision.sh
     fi
 
     # Clean up
     lxc exec "$container" -- rm /tmp/provision.sh
+
+    # Mark as provisioned (redundancy in case individual script didn't mark itself)
+    mark_provisioned "$container"
 
     echo -e "${GREEN}✓ ${container} provisioned successfully${NC}"
     echo ""
@@ -137,6 +154,13 @@ else
 fi
 
 echo ""
+echo -e "${BLUE}=== Provisioning Status Summary ===${NC}"
+echo -e "  infinibay-postgres:  $(get_provisioning_status 'infinibay-postgres')"
+echo -e "  infinibay-redis:     $(get_provisioning_status 'infinibay-redis')"
+echo -e "  infinibay-backend:   $(get_provisioning_status 'infinibay-backend')"
+echo -e "  infinibay-frontend:  $(get_provisioning_status 'infinibay-frontend')"
+echo ""
+
 if [ "$HEALTH_FAILED" = false ]; then
     echo -e "${GREEN}=== Infinibay is ready! ===${NC}"
     echo ""
