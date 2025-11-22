@@ -7,6 +7,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 
+# Source the universal package manager library
+source "${SCRIPT_DIR}/lib/package-manager.sh"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -48,8 +51,8 @@ check_kvm_support() {
 
     if ! kvm-ok &>/dev/null; then
         log_warning "kvm-ok command not found. Installing cpu-checker..."
-        apt-get update -qq
-        apt-get install -y cpu-checker
+        pkg_update
+        pkg_install cpu-checker
     fi
 
     if kvm-ok &>/dev/null; then
@@ -287,7 +290,7 @@ check_env_file() {
 install_dependencies() {
     log_info "Installing system dependencies..."
 
-    apt-get update -qq
+    pkg_update
 
     # Install required packages
     PACKAGES=(
@@ -302,15 +305,16 @@ install_dependencies() {
     )
 
     for package in "${PACKAGES[@]}"; do
-        if ! dpkg -l | grep -q "^ii  $package"; then
+        if ! pkg_is_installed "$package"; then
             log_info "Installing $package..."
-            apt-get install -y "$package"
+            pkg_install "$package"
         fi
     done
 
     # Ensure libvirt is running
-    systemctl enable libvirtd
-    systemctl start libvirtd
+    local LIBVIRT_SERVICE=$(get_service_name libvirt)
+    systemctl enable "$LIBVIRT_SERVICE"
+    systemctl start "$LIBVIRT_SERVICE"
 
     log_success "System dependencies installed"
 }
