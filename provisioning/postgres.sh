@@ -4,17 +4,28 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source the universal package manager library
+source "${SCRIPT_DIR}/../lib/package-manager.sh"
+
 echo "=== PostgreSQL Provisioning ==="
 
 # Update package lists
-apt-get update
+pkg_update
 
 # Install PostgreSQL
 echo "Installing PostgreSQL..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql postgresql-contrib
+pkg_install postgresql postgresql-contrib
+
+# Initialize PostgreSQL (distribution-specific)
+init_postgresql
+
+# Get PostgreSQL service name
+PG_SERVICE=$(get_service_name postgresql)
 
 # Stop PostgreSQL to reconfigure
-systemctl stop postgresql
+systemctl stop "$PG_SERVICE"
 
 # Get PostgreSQL version
 PG_VERSION=$(ls /etc/postgresql/)
@@ -48,8 +59,8 @@ host    all             all             172.16.0.0/12           scram-sha-256
 EOF
 
 # Start PostgreSQL
-systemctl start postgresql
-systemctl enable postgresql
+systemctl start "$PG_SERVICE"
+systemctl enable "$PG_SERVICE"
 
 # Wait for PostgreSQL to be ready
 sleep 3

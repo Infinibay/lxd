@@ -4,14 +4,19 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source the universal package manager library
+source "${SCRIPT_DIR}/../lib/package-manager.sh"
+
 echo "=== Frontend Provisioning ==="
 
 # Update package lists
-apt-get update
+pkg_update
 
 # Install dependencies
 echo "Installing dependencies..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
+pkg_install \
     curl \
     git \
     build-essential
@@ -37,8 +42,7 @@ echo "✓ Frontend repository cloned successfully"
 
 # Install Node.js 20.x (LTS)
 echo "Installing Node.js 20.x..."
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+install_nodejs
 
 # Verify installation
 node --version

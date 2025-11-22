@@ -4,17 +4,26 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source the universal package manager library
+source "${SCRIPT_DIR}/../lib/package-manager.sh"
+
 echo "=== Redis Provisioning ==="
 
 # Update package lists
-apt-get update
+pkg_update
 
 # Install Redis
 echo "Installing Redis..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server
+pkg_install redis
+
+# Get Redis service name and config path
+REDIS_SERVICE=$(get_service_name redis)
+REDIS_CONF=$(get_config_path redis)
 
 # Stop Redis to reconfigure
-systemctl stop redis-server
+systemctl stop "$REDIS_SERVICE"
 
 # Configure Redis to use /data
 echo "Configuring Redis..."
@@ -24,10 +33,10 @@ chown redis:redis /data/redis
 chmod 750 /data/redis
 
 # Backup original config
-cp /etc/redis/redis.conf /etc/redis/redis.conf.backup
+cp "$REDIS_CONF" "${REDIS_CONF}.backup"
 
 # Update Redis configuration
-cat > /etc/redis/redis.conf << 'EOF'
+cat > "$REDIS_CONF" << 'EOF'
 # Infinibay Redis Configuration
 
 # Network
@@ -70,8 +79,8 @@ maxclients 10000
 EOF
 
 # Start Redis
-systemctl start redis-server
-systemctl enable redis-server
+systemctl start "$REDIS_SERVICE"
+systemctl enable "$REDIS_SERVICE"
 
 # Wait for Redis to be ready
 sleep 2

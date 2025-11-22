@@ -4,14 +4,19 @@
 
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source the universal package manager library
+source "${SCRIPT_DIR}/../lib/package-manager.sh"
+
 echo "=== Backend Provisioning ==="
 
 # Update package lists
-apt-get update
+pkg_update
 
 # Install system dependencies
 echo "Installing system dependencies..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y \
+pkg_install \
     curl \
     git \
     build-essential \
@@ -70,8 +75,7 @@ echo "✓ Repositories cloned successfully"
 
 # Install Node.js 20.x (LTS)
 echo "Installing Node.js 20.x..."
-curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+install_nodejs
 
 # Verify Node.js installation
 node --version
@@ -102,8 +106,9 @@ su - infinibay -c "source ~/.cargo/env && rustc --version"
 
 # Configure libvirt
 echo "Configuring libvirt..."
-systemctl enable libvirtd
-systemctl start libvirtd
+LIBVIRT_SERVICE=$(get_service_name libvirt)
+systemctl enable "$LIBVIRT_SERVICE"
+systemctl start "$LIBVIRT_SERVICE"
 
 # Configure libvirt to use /data for images
 # Create subdirectories for libvirt
@@ -152,11 +157,11 @@ chmod 755 /opt/infinibay/wallpapers
 echo "✓ Wallpapers directory created"
 
 # Create systemd service for backend
-cat > /etc/systemd/system/infinibay-backend.service << 'EOF'
+cat > /etc/systemd/system/infinibay-backend.service << EOF
 [Unit]
 Description=Infinibay Backend API
-After=network.target postgresql.service redis.service libvirtd.service
-Wants=postgresql.service redis.service libvirtd.service
+After=network.target postgresql.service redis.service ${LIBVIRT_SERVICE}.service
+Wants=postgresql.service redis.service ${LIBVIRT_SERVICE}.service
 
 [Service]
 Type=simple
