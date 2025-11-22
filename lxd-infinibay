@@ -13,6 +13,7 @@ NC='\033[0m' # No Color
 
 # Change to script directory
 cd "$(dirname "$0")"
+source "$(dirname "$0")/lib/lxd-path.sh"
 
 # Check if values.yml exists
 if [[ ! -f values.yml ]]; then
@@ -24,4 +25,4 @@ if [[ ! -f values.yml ]]; then
 fi
 
 # Run lxd-compose with proper environment
-exec sg lxd -c "LXD_DIR=/var/snap/lxd/common/lxd lxd-compose $*"
+exec sg lxd -c "LXD_DIR=$LXD_DIR lxd-compose $*"
