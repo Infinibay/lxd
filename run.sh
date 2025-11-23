@@ -11,6 +11,56 @@ BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Function to check required commands
+check_required_commands() {
+    local missing_commands=()
+
+    # Check for required commands
+    if ! command -v sg &>/dev/null; then
+        missing_commands+=("sg (from shadow-utils package)")
+    fi
+
+    if ! command -v lxc &>/dev/null; then
+        missing_commands+=("lxc (LXD client)")
+    fi
+
+    if ! command -v lxd-compose &>/dev/null; then
+        missing_commands+=("lxd-compose")
+    fi
+
+    # Report missing commands
+    if [ ${#missing_commands[@]} -gt 0 ]; then
+        echo -e "${RED}Error: Missing required commands:${NC}"
+        for cmd in "${missing_commands[@]}"; do
+            echo -e "  - $cmd"
+        done
+        echo ""
+        echo -e "${YELLOW}Please run setup.sh first to install dependencies.${NC}"
+        exit 1
+    fi
+}
+
+# Function to check if user is in lxd group
+check_lxd_group() {
+    if ! groups | grep -qw lxd; then
+        echo -e "${RED}Error: Current user is not in the 'lxd' group${NC}"
+        echo ""
+        echo -e "${YELLOW}To fix this, run one of the following:${NC}"
+        echo -e "  1. Activate group in current session: ${BLUE}newgrp lxd${NC}"
+        echo -e "  2. Or logout and login again"
+        echo ""
+        echo -e "${YELLOW}If you haven't run setup yet:${NC}"
+        echo -e "  ${BLUE}sudo ./setup.sh${NC}"
+        exit 1
+    fi
+}
+
+# Check required commands before proceeding
+check_required_commands
+
+# Check if user is in lxd group
+check_lxd_group
+
 # Get absolute path to infinibay directory (parent of lxd/)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INFINIBAY_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"

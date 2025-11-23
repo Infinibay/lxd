@@ -11,21 +11,40 @@ PKG_UPDATE_CMD=""
 PKG_INSTALL_CMD=""
 PKG_CHECK_CMD=""
 
-# Detect OS family from /etc/os-release
+# Detect OS family by checking available commands first, then /etc/os-release
 detect_os_family() {
+    # First, try to detect by available package manager commands
+    if command -v apt-get >/dev/null 2>&1; then
+        OS_FAMILY="debian"
+        return 0
+    elif command -v dnf >/dev/null 2>&1; then
+        OS_FAMILY="rhel"
+        return 0
+    elif command -v yum >/dev/null 2>&1 && ! command -v dnf >/dev/null 2>&1; then
+        OS_FAMILY="rhel"
+        return 0
+    elif command -v pacman >/dev/null 2>&1; then
+        OS_FAMILY="arch"
+        return 0
+    elif command -v zypper >/dev/null 2>&1; then
+        OS_FAMILY="suse"
+        return 0
+    fi
+
+    # Fallback to /etc/os-release if command detection didn't work
     if [ -f /etc/os-release ]; then
         . /etc/os-release
         case "$ID" in
-            debian|ubuntu|linuxmint)
+            debian|ubuntu|linuxmint|pop|elementary|zorin)
                 OS_FAMILY="debian"
                 ;;
-            rhel|centos|fedora|rocky|almalinux)
+            rhel|centos|fedora|rocky|almalinux|ol)
                 OS_FAMILY="rhel"
                 ;;
             opensuse|opensuse-leap|opensuse-tumbleweed|sles)
                 OS_FAMILY="suse"
                 ;;
-            arch|manjaro|endeavouros)
+            arch|manjaro|endeavouros|garuda|cachyos)
                 OS_FAMILY="arch"
                 ;;
             *)
@@ -35,7 +54,7 @@ detect_os_family() {
         esac
         return 0
     else
-        echo "Error: /etc/os-release not found" >&2
+        echo "Error: Could not detect OS family" >&2
         return 1
     fi
 }
@@ -121,7 +140,18 @@ map_package_name() {
         cpu-checker)
             case "$OS_FAMILY" in
                 debian) echo "cpu-checker" ;;
-                *) echo "" ;; # Not available/needed on other distributions
+                rhel) echo "libvirt-client" ;; # virt-host-validate comes with libvirt-client
+                arch) echo "libvirt" ;; # Included in libvirt package
+                suse) echo "libvirt-client" ;; # virt-host-validate comes with libvirt-client
+                *) echo "" ;;
+            esac
+            ;;
+        libvirt-clients)
+            case "$OS_FAMILY" in
+                debian) echo "libvirt-clients" ;;
+                rhel|suse) echo "libvirt-client" ;;
+                arch) echo "libvirt" ;;
+                *) echo "$package" ;;
             esac
             ;;
         libvirt-daemon-system)
@@ -174,6 +204,76 @@ map_package_name() {
                 debian|rhel|arch|suse) echo "python3-pip" ;;
                 *) echo "$package" ;;
             esac
+            ;;
+        bridge-utils)
+            case "$OS_FAMILY" in
+                debian|rhel|suse) echo "bridge-utils" ;;
+                arch) echo "bridge-utils" ;;
+                *) echo "$package" ;;
+            esac
+            ;;
+        snapd)
+            case "$OS_FAMILY" in
+                debian|rhel|suse|arch) echo "snapd" ;;
+                *) echo "$package" ;;
+            esac
+            ;;
+        golang|golang-go|go)
+            case "$OS_FAMILY" in
+                debian) echo "golang-go" ;;
+                rhel) echo "golang" ;;
+                arch) echo "go" ;;
+                suse) echo "go" ;;
+                *) echo "$package" ;;
+            esac
+            ;;
+        lxd)
+            case "$OS_FAMILY" in
+                debian|arch) echo "lxd" ;;
+                rhel|suse) echo "" ;; # Not in native repos, requires snap
+                *) echo "$package" ;;
+            esac
+            ;;
+        iproute2|iproute)
+            case "$OS_FAMILY" in
+                debian) echo "iproute2" ;;
+                rhel|arch|suse) echo "iproute2" ;;
+                *) echo "$package" ;;
+            esac
+            ;;
+        pkg-config)
+            case "$OS_FAMILY" in
+                debian|rhel|arch|suse) echo "pkg-config" ;;
+                *) echo "$package" ;;
+            esac
+            ;;
+        libssl-dev)
+            case "$OS_FAMILY" in
+                debian) echo "libssl-dev" ;;
+                rhel|suse) echo "openssl-devel" ;;
+                arch) echo "openssl" ;;
+                *) echo "$package" ;;
+            esac
+            ;;
+        qemu-utils)
+            case "$OS_FAMILY" in
+                debian) echo "qemu-utils" ;;
+                rhel|suse) echo "qemu-img" ;;
+                arch) echo "qemu-base" ;;
+                *) echo "$package" ;;
+            esac
+            ;;
+        python3|python3-dev)
+            case "$OS_FAMILY" in
+                debian) echo "python3" ;;
+                rhel|suse) echo "python3" ;;
+                arch) echo "python" ;;
+                *) echo "$package" ;;
+            esac
+            ;;
+        curl|git|openssl)
+            # These packages have the same name across distributions
+            echo "$package"
             ;;
         *)
             # No mapping needed, return as-is

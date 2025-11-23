@@ -24,13 +24,38 @@ init_postgresql
 # Get PostgreSQL service name
 PG_SERVICE=$(get_service_name postgresql)
 
-# Stop PostgreSQL to reconfigure
-systemctl stop "$PG_SERVICE"
+# Detect PostgreSQL configuration paths based on OS family
+case "$OS_FAMILY" in
+    debian)
+        PG_VERSION=$(ls /etc/postgresql/ 2>/dev/null | head -n1)
+        PG_CONF="/etc/postgresql/$PG_VERSION/main/postgresql.conf"
+        PG_HBA="/etc/postgresql/$PG_VERSION/main/pg_hba.conf"
+        PG_BIN="/usr/lib/postgresql/$PG_VERSION/bin/initdb"
+        ;;
+    rhel)
+        # RHEL stores config in data directory
+        PG_CONF="/var/lib/pgsql/data/postgresql.conf"
+        PG_HBA="/var/lib/pgsql/data/pg_hba.conf"
+        PG_BIN="/usr/bin/initdb"
+        ;;
+    arch)
+        PG_CONF="/var/lib/postgres/data/postgresql.conf"
+        PG_HBA="/var/lib/postgres/data/pg_hba.conf"
+        PG_BIN="/usr/bin/initdb"
+        ;;
+    suse)
+        PG_CONF="/var/lib/pgsql/data/postgresql.conf"
+        PG_HBA="/var/lib/pgsql/data/pg_hba.conf"
+        PG_BIN="/usr/bin/initdb"
+        ;;
+    *)
+        echo "Unknown OS family: $OS_FAMILY"
+        exit 1
+        ;;
+esac
 
-# Get PostgreSQL version
-PG_VERSION=$(ls /etc/postgresql/)
-PG_CONF="/etc/postgresql/$PG_VERSION/main/postgresql.conf"
-PG_HBA="/etc/postgresql/$PG_VERSION/main/pg_hba.conf"
+# Stop PostgreSQL to reconfigure
+systemctl stop "$PG_SERVICE" || true
 
 # Configure PostgreSQL to use /data
 echo "Configuring data directory..."
@@ -42,12 +67,40 @@ chmod 700 /data/pgdata
 # Initialize data directory if empty
 if [ ! -f /data/pgdata/PG_VERSION ]; then
     echo "Initializing PostgreSQL data directory..."
-    su - postgres -c "/usr/lib/postgresql/$PG_VERSION/bin/initdb -D /data/pgdata"
+    su - postgres -c "$PG_BIN -D /data/pgdata"
 fi
 
-# Update postgresql.conf
-sed -i "s|data_directory = .*|data_directory = '/data/pgdata'|" "$PG_CONF"
-sed -i "s|#listen_addresses = 'localhost'|listen_addresses = '*'|" "$PG_CONF"
+# For Debian/Ubuntu, config files are separate from data directory
+if [ "$OS_FAMILY" = "debian" ]; then
+    # Update postgresql.conf to point to custom data directory
+    sed -i "s|data_directory = .*|data_directory = '/data/pgdata'|" "$PG_CONF"
+    sed -i "s|#listen_addresses = 'localhost'|listen_addresses = '*'|" "$PG_CONF"
+else
+    # For RHEL/Arch/SUSE, config is in data directory, so we modify the custom one
+    PG_CONF="/data/pgdata/postgresql.conf"
+    PG_HBA="/data/pgdata/pg_hba.conf"
+
+    # Update postgresql.conf
+    sed -i "s|#listen_addresses = 'localhost'|listen_addresses = '*'|" "$PG_CONF"
+    sed -i "s|listen_addresses = 'localhost'|listen_addresses = '*'|" "$PG_CONF"
+
+    # Update systemd to use custom data directory
+    if [ "$OS_FAMILY" = "rhel" ]; then
+        mkdir -p /etc/systemd/system/postgresql.service.d/
+        cat > /etc/systemd/system/postgresql.service.d/override.conf << 'EOF'
+[Service]
+Environment=PGDATA=/data/pgdata
+EOF
+        systemctl daemon-reload
+    elif [ "$OS_FAMILY" = "arch" ]; then
+        mkdir -p /etc/systemd/system/postgresql.service.d/
+        cat > /etc/systemd/system/postgresql.service.d/override.conf << 'EOF'
+[Service]
+Environment=PGDATA=/data/pgdata
+EOF
+        systemctl daemon-reload
+    fi
+fi
 
 # Configure authentication to allow connections from other containers
 echo "Configuring authentication..."

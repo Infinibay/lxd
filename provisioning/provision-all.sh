@@ -104,13 +104,17 @@ fi
 echo -e "${YELLOW}Step 4/4: Provisioning Frontend...${NC}"
 # Detect HOST IP (not container IP) since ports are proxied to host
 # Get the IP of the default route interface (usually the main network interface)
-HOST_IP=$(ip route get 1.1.1.1 | grep -oP 'src \K[\d.]+')
-if [ -z "$HOST_IP" ]; then
-    echo -e "${YELLOW}Warning: Could not detect host IP, trying alternative method${NC}"
-    HOST_IP=$(hostname -I | awk '{print $1}')
+HOST_IP=""
+if command -v ip &>/dev/null; then
+    HOST_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[\d.]+' || echo "")
+fi
+if [ -z "$HOST_IP" ] && command -v hostname &>/dev/null; then
+    echo -e "${YELLOW}Warning: Could not detect host IP via ip command, trying hostname${NC}"
+    HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
 fi
 if [ -z "$HOST_IP" ]; then
     echo -e "${RED}Error: Could not detect host IP${NC}"
+    echo -e "${YELLOW}Please ensure either 'ip' or 'hostname' command is available${NC}"
     exit 1
 fi
 echo -e "${GREEN}Detected host IP: ${HOST_IP}${NC}"

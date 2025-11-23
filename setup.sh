@@ -49,18 +49,51 @@ check_kvm_support() {
         exit 1
     fi
 
-    if ! kvm-ok &>/dev/null; then
-        log_warning "kvm-ok command not found. Installing cpu-checker..."
-        pkg_update
-        pkg_install cpu-checker
-    fi
-
-    if kvm-ok &>/dev/null; then
-        log_success "KVM acceleration available"
-    else
-        log_error "KVM acceleration not available on this system"
-        exit 1
-    fi
+    # Use distribution-specific tools to verify KVM support
+    case "$OS_FAMILY" in
+        debian)
+            # Use kvm-ok on Debian-based systems
+            if ! command -v kvm-ok &>/dev/null; then
+                log_warning "kvm-ok command not found. Installing cpu-checker..."
+                pkg_update
+                pkg_install cpu-checker
+            fi
+            if kvm-ok &>/dev/null; then
+                log_success "KVM acceleration available"
+            else
+                log_error "KVM acceleration not available on this system"
+                exit 1
+            fi
+            ;;
+        rhel|suse)
+            # Use virt-host-validate on RHEL/SUSE-based systems
+            if ! command -v virt-host-validate &>/dev/null; then
+                log_warning "virt-host-validate not found. Installing libvirt-client..."
+                pkg_update
+                pkg_install cpu-checker
+            fi
+            if virt-host-validate qemu 2>&1 | grep -q "QEMU: Checking.*KVM.*PASS"; then
+                log_success "KVM acceleration available"
+            else
+                log_warning "virt-host-validate shows warnings, but /dev/kvm exists"
+                log_success "KVM device found at /dev/kvm"
+            fi
+            ;;
+        arch)
+            # Use lscpu on Arch-based systems
+            if lscpu | grep -q "Virtualization"; then
+                log_success "KVM acceleration available"
+            else
+                log_warning "Could not detect virtualization via lscpu, but /dev/kvm exists"
+                log_success "KVM device found at /dev/kvm"
+            fi
+            ;;
+        *)
+            # Generic check - if /dev/kvm exists, we assume it's working
+            log_warning "Using generic KVM check for unknown OS family: $OS_FAMILY"
+            log_success "KVM device found at /dev/kvm"
+            ;;
+    esac
 }
 
 install_lxd() {
@@ -68,15 +101,76 @@ install_lxd() {
 
     if command -v lxc &>/dev/null; then
         log_success "LXD already installed: $(lxc version)"
-    else
-        log_info "Installing LXD via snap..."
-        snap install lxd
-        log_success "LXD installed successfully"
+        return 0
     fi
+
+    log_info "Installing LXD..."
+
+    case "$OS_FAMILY" in
+        debian)
+            # Try native package first, fallback to snap
+            if apt-cache show lxd &>/dev/null; then
+                log_info "Installing LXD from native repository..."
+                pkg_install lxd
+            else
+                log_info "LXD not available in native repos, using snap..."
+                if ! command -v snap &>/dev/null; then
+                    log_info "Installing snapd..."
+                    pkg_install snapd
+                    systemctl enable --now snapd.socket
+                    sleep 2
+                fi
+                snap install lxd
+            fi
+            ;;
+        rhel)
+            # RHEL doesn't have LXD in native repos, use snap
+            log_info "Installing LXD via snap (native package not available for RHEL)..."
+            if ! command -v snap &>/dev/null; then
+                log_info "Installing snapd..."
+                pkg_install snapd
+                systemctl enable --now snapd.socket
+                # Create symlink for classic snap support
+                if [[ ! -e /snap ]]; then
+                    ln -s /var/lib/snapd/snap /snap
+                fi
+                sleep 2
+            fi
+            snap install lxd
+            ;;
+        arch)
+            # Arch has LXD in AUR, try native package
+            log_info "Installing LXD from native repository..."
+            pkg_install lxd
+            systemctl enable --now lxd.service
+            ;;
+        suse)
+            # openSUSE might have LXD, check first
+            if zypper search -x lxd &>/dev/null; then
+                log_info "Installing LXD from native repository..."
+                pkg_install lxd
+            else
+                log_info "LXD not available in native repos, using snap..."
+                if ! command -v snap &>/dev/null; then
+                    log_info "Installing snapd..."
+                    pkg_install snapd
+                    systemctl enable --now snapd.socket
+                    sleep 2
+                fi
+                snap install lxd
+            fi
+            ;;
+        *)
+            log_error "Unsupported OS family for LXD installation: $OS_FAMILY"
+            exit 1
+            ;;
+    esac
+
+    log_success "LXD installed successfully"
 
     # Ensure current user is in lxd group
     if [[ -n "${SUDO_USER:-}" ]]; then
-        if ! groups "$SUDO_USER" | grep -q "\blxd\b"; then
+        if ! groups "$SUDO_USER" | grep -qw lxd; then
             log_info "Adding $SUDO_USER to lxd group..."
             usermod -aG lxd "$SUDO_USER"
             log_warning "User added to lxd group. You MUST run 'newgrp lxd' or logout/login for changes to take effect!"
@@ -99,7 +193,33 @@ install_lxd_compose() {
     # Install Go if not present (required for lxd-compose)
     if ! command -v go &>/dev/null; then
         log_info "Installing Go..."
-        snap install go --classic
+        case "$OS_FAMILY" in
+            debian)
+                # Use native package or download from golang.org
+                if apt-cache show golang-go &>/dev/null; then
+                    pkg_install golang-go
+                else
+                    pkg_install golang
+                fi
+                ;;
+            rhel)
+                pkg_install golang
+                ;;
+            arch)
+                pkg_install go
+                ;;
+            suse)
+                pkg_install go
+                ;;
+            *)
+                log_error "Unsupported OS for Go installation: $OS_FAMILY"
+                log_info "Please install Go manually from https://golang.org/dl/"
+                exit 1
+                ;;
+        esac
+        log_success "Go installed successfully"
+    else
+        log_success "Go already installed: $(go version)"
     fi
 
     # Note: Cannot use 'go install' due to replace directives in go.mod
@@ -264,10 +384,21 @@ check_env_file() {
         log_warning "Please edit $ENV_FILE with your configuration before deploying"
 
         # Auto-detect host IP
-        HOST_IP=$(ip route get 1 2>/dev/null | awk '{print $7; exit}' || echo "")
+        HOST_IP=""
+        if command -v ip &>/dev/null; then
+            HOST_IP=$(ip route get 1 2>/dev/null | awk '{print $7; exit}' || echo "")
+        fi
+
+        # Fallback to hostname -I if ip command didn't work
+        if [[ -z "$HOST_IP" ]] && command -v hostname &>/dev/null; then
+            HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "")
+        fi
+
         if [[ -n "$HOST_IP" ]]; then
             sed -i "s/HOST_IP=.*/HOST_IP=$HOST_IP/" "$ENV_FILE"
             log_info "Auto-detected host IP: $HOST_IP"
+        else
+            log_warning "Could not auto-detect host IP. Please configure manually in $ENV_FILE"
         fi
 
         # Generate random passwords
@@ -299,22 +430,40 @@ install_dependencies() {
         qemu-kvm
         cpu-checker
         bridge-utils
+        iproute2
         curl
         git
         openssl
     )
 
     for package in "${PACKAGES[@]}"; do
+        # Get mapped package name
+        local mapped_package=$(map_package_name "$package")
+
+        # Skip if package maps to empty (not available on this distro)
+        if [[ -z "$mapped_package" ]]; then
+            log_info "Skipping $package (not needed on $OS_FAMILY)"
+            continue
+        fi
+
         if ! pkg_is_installed "$package"; then
             log_info "Installing $package..."
             pkg_install "$package"
+        else
+            log_success "$package already installed"
         fi
     done
 
     # Ensure libvirt is running
     local LIBVIRT_SERVICE=$(get_service_name libvirt)
-    systemctl enable "$LIBVIRT_SERVICE"
-    systemctl start "$LIBVIRT_SERVICE"
+    if systemctl is-active --quiet "$LIBVIRT_SERVICE"; then
+        log_success "libvirt already running"
+    else
+        log_info "Starting libvirt service..."
+        systemctl enable "$LIBVIRT_SERVICE"
+        systemctl start "$LIBVIRT_SERVICE"
+        log_success "libvirt service started"
+    fi
 
     log_success "System dependencies installed"
 }
@@ -329,7 +478,7 @@ show_next_steps() {
     # Check if user needs to activate lxd group
     local NEEDS_NEWGRP=false
     if [[ -n "${SUDO_USER:-}" ]]; then
-        if ! sudo -u "$SUDO_USER" groups | grep -q "\blxd\b"; then
+        if ! sudo -u "$SUDO_USER" groups | grep -qw lxd; then
             NEEDS_NEWGRP=true
         fi
     fi
