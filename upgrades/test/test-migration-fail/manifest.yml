@@ -1,0 +1,62 @@
+version: "test-migration-fail"
+from_version: "test-base"
+description: "Test scenario: Data migration failure with rollback - validates database restoration when migration fails"
+
+# Breaking changes that user should know about
+breaking_changes:
+  - "Test: This upgrade will fail during data migration to test database rollback"
+
+# Pre-flight checks (executed before backup)
+pre_flight:
+  - name: "check-disk-space"
+    script: "pre-flight.sh"
+    required: true
+
+# Backup configuration
+backup:
+  database: true
+  redis: false
+  code: true
+
+# Upgrade steps (executed in order)
+steps:
+  - name: "update-schema"
+    container: "infinibay-backend"
+    script: "update-schema.sh"
+    description: "Applying database schema migrations (succeeds)"
+    timeout: 120
+    rollback_on_fail: true
+
+  - name: "run-data-migrations"
+    container: "infinibay-backend"
+    script: "run-data-migrations-fail.sh"
+    description: "Running data migrations (WILL FAIL)"
+    timeout: 120
+    rollback_on_fail: true
+    depends_on: ["update-schema"]
+
+  - name: "update-backend-code"
+    container: "infinibay-backend"
+    script: "update-backend.sh"
+    description: "Deploying backend code (should not execute)"
+    timeout: 60
+    rollback_on_fail: true
+    depends_on: ["run-data-migrations"]
+
+  - name: "update-frontend"
+    container: "infinibay-frontend"
+    script: "update-frontend.sh"
+    description: "Deploying frontend (should not execute)"
+    timeout: 60
+    depends_on: ["update-backend-code"]
+    rollback_on_fail: true
+
+# Post-upgrade validation (should not execute)
+validation:
+  - name: "health-check"
+    script: "validate-health.sh"
+    critical: true
+
+# Rollback strategy
+rollback:
+  automatic: true

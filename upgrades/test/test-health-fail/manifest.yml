@@ -1,0 +1,50 @@
+version: "test-health-fail"
+from_version: "test-base"
+description: "Test scenario: Health check failure with rollback - validates rollback when post-upgrade validation fails"
+
+# Breaking changes that user should know about
+breaking_changes:
+  - "Test: This upgrade will fail during health checks after successful upgrade steps"
+
+# Pre-flight checks (executed before backup)
+pre_flight:
+  - name: "check-disk-space"
+    script: "pre-flight.sh"
+    required: true
+
+# Backup configuration
+backup:
+  database: true
+  redis: false
+  code: true
+
+# Upgrade steps (all succeed)
+steps:
+  - name: "update-backend"
+    container: "infinibay-backend"
+    script: "update-backend.sh"
+    description: "Updating backend (succeeds)"
+    timeout: 60
+    rollback_on_fail: true
+
+  - name: "update-frontend"
+    container: "infinibay-frontend"
+    script: "update-frontend.sh"
+    description: "Updating frontend (succeeds)"
+    timeout: 60
+    depends_on: ["update-backend"]
+    rollback_on_fail: true
+
+# Post-upgrade validation (backend health check will fail)
+validation:
+  - name: "health-check-backend"
+    script: "validate-health-fail.sh"
+    critical: true
+
+  - name: "health-check-frontend"
+    script: "validate-frontend.sh"
+    critical: true
+
+# Rollback strategy
+rollback:
+  automatic: true

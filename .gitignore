@@ -1,6 +1,7 @@
 # Environment variables and values (contains passwords)
 .env
 values.yml
+TESTING.md
 
 # Temporary files
 *.tmp

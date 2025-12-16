@@ -1,0 +1,46 @@
+version: "test-success"
+from_version: "test-base"
+description: "Test scenario: Successful upgrade - validates happy path where all steps succeed"
+
+# Breaking changes that user should know about
+breaking_changes:
+  - "Test: This is a simulated breaking change for testing user confirmation flow"
+
+# Pre-flight checks (executed before backup)
+pre_flight:
+  - name: "check-disk-space"
+    script: "pre-flight.sh"
+    required: true
+
+# Backup configuration
+backup:
+  database: true
+  redis: false
+  code: true
+
+# Upgrade steps (executed in order)
+steps:
+  - name: "update-backend"
+    container: "infinibay-backend"
+    script: "update-backend.sh"
+    description: "Simulating backend update"
+    timeout: 60
+    rollback_on_fail: true
+
+  - name: "update-frontend"
+    container: "infinibay-frontend"
+    script: "update-frontend.sh"
+    description: "Simulating frontend update"
+    timeout: 60
+    depends_on: ["update-backend"]
+    rollback_on_fail: true
+
+# Post-upgrade validation
+validation:
+  - name: "health-check"
+    script: "validate-health.sh"
+    critical: true
+
+# Rollback strategy
+rollback:
+  automatic: true

@@ -1,0 +1,46 @@
+version: "test-build-fail"
+from_version: "test-base"
+description: "Test scenario: Build failure with automatic rollback - validates rollback mechanism when build fails"
+
+# Breaking changes that user should know about
+breaking_changes:
+  - "Test: This upgrade will fail during backend build to test rollback"
+
+# Pre-flight checks (executed before backup)
+pre_flight:
+  - name: "check-disk-space"
+    script: "pre-flight.sh"
+    required: true
+
+# Backup configuration
+backup:
+  database: true
+  redis: false
+  code: true
+
+# Upgrade steps (executed in order)
+steps:
+  - name: "update-backend"
+    container: "infinibay-backend"
+    script: "update-backend-fail.sh"
+    description: "Simulating backend update (WILL FAIL)"
+    timeout: 60
+    rollback_on_fail: true
+
+  - name: "update-frontend"
+    container: "infinibay-frontend"
+    script: "update-frontend.sh"
+    description: "Simulating frontend update (should not execute)"
+    timeout: 60
+    depends_on: ["update-backend"]
+    rollback_on_fail: true
+
+# Post-upgrade validation (should not execute)
+validation:
+  - name: "health-check"
+    script: "validate-health.sh"
+    critical: true
+
+# Rollback strategy
+rollback:
+  automatic: true

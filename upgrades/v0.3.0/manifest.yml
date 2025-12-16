@@ -1,0 +1,85 @@
+version: "0.3.0"
+from_version: "0.2.0"
+description: "Adds firewall rule presets and VM scheduling"
+
+# Breaking changes that user should know about
+breaking_changes:
+  - "GraphQL API: deprecated `createFilter` mutation"
+  - "Database: VMs now require `departmentId` (auto-migrated to default dept)"
+
+# Pre-flight checks (executed before backup)
+pre_flight:
+  - name: "check-disk-space"
+    script: "pre-flight.sh"
+    required: true
+
+  - name: "check-running-vms"
+    script: "check-vms.sh"
+    required: false
+    message: "You have running VMs. They will continue running but may experience brief connectivity loss."
+
+# Backup configuration
+backup:
+  database: true
+  redis: false  # Redis data is cache, no need to backup
+  code: true
+
+# Upgrade steps (executed in order)
+steps:
+  - name: "update-libvirt-node"
+    container: "infinibay-backend"
+    script: "backend/update.sh --phase=libvirt"
+    description: "Rebuilding native libvirt bindings"
+    timeout: 600  # 10 minutes for Rust compilation
+
+  - name: "update-backend-schema"
+    container: "infinibay-backend"
+    script: "backend/update.sh --phase=schema"
+    description: "Applying database migrations"
+    rollback_on_fail: true
+
+  - name: "run-data-migrations"
+    container: "infinibay-backend"
+    script: "backend/update.sh --phase=data-migrations"
+    description: "Populating new columns and transforming data"
+    rollback_on_fail: true
+
+  - name: "update-backend-code"
+    container: "infinibay-backend"
+    script: "backend/update.sh --phase=deploy"
+    description: "Deploying new backend code"
+    rollback_on_fail: true
+
+  - name: "update-frontend"
+    container: "infinibay-frontend"
+    script: "frontend/update.sh"
+    description: "Rebuilding and deploying frontend"
+    depends_on: ["update-backend-code"]
+    rollback_on_fail: true
+
+# Post-upgrade validation
+validation:
+  - name: "health-check-backend"
+    script: "test-backend.sh"
+    critical: true
+
+  - name: "health-check-frontend"
+    script: "test-frontend.sh"
+    critical: true
+
+  - name: "test-graphql-queries"
+    script: "test-queries.sh"
+    critical: false
+
+# Rollback strategy
+rollback:
+  automatic: true  # Automatically rollback if any critical step fails
+  steps:
+    - name: "restore-frontend"
+      script: "rollback-frontend.sh"
+
+    - name: "restore-backend"
+      script: "rollback-backend.sh"
+
+    - name: "restore-database"
+      script: "rollback-database.sh"

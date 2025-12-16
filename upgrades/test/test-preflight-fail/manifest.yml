@@ -1,0 +1,45 @@
+version: "test-preflight-fail"
+from_version: "test-base"
+description: "Test scenario: Pre-flight check failure - validates upgrade is blocked when required checks fail"
+
+# Breaking changes that user should know about
+breaking_changes:
+  - "Test: This upgrade will fail during pre-flight checks"
+
+# Pre-flight checks (executed before backup)
+pre_flight:
+  - name: "check-disk-space-fail"
+    script: "pre-flight-fail.sh"
+    required: true
+
+# Backup configuration (should never execute)
+backup:
+  database: true
+  redis: false
+  code: true
+
+# Upgrade steps (should never execute)
+steps:
+  - name: "update-backend"
+    container: "infinibay-backend"
+    script: "update-backend.sh"
+    description: "Updating backend (should not execute)"
+    timeout: 60
+    rollback_on_fail: true
+
+  - name: "update-frontend"
+    container: "infinibay-frontend"
+    script: "update-frontend.sh"
+    description: "Updating frontend (should not execute)"
+    timeout: 60
+    rollback_on_fail: true
+
+# Post-upgrade validation (should never execute)
+validation:
+  - name: "health-check"
+    script: "validate-health.sh"
+    critical: true
+
+# Rollback strategy (should not be needed - no changes made)
+rollback:
+  automatic: true

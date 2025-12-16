@@ -1,0 +1,66 @@
+version: "test-data-migrations-upgrade"
+from_version: "test-base"
+description: "Test scenario: Data migrations integration - validates registry tracking and idempotency through upgrade flow"
+
+# Breaking changes that user should know about
+breaking_changes:
+  - "Test: This upgrade tests data migration integration with the upgrade system"
+
+# Pre-flight checks (executed before backup)
+pre_flight:
+  - name: "check-disk-space"
+    script: "pre-flight.sh"
+    required: true
+
+# Backup configuration
+backup:
+  database: true
+  redis: false
+  code: true
+
+# Upgrade steps (executed in order)
+steps:
+  - name: "setup-test-migrations"
+    container: "infinibay-backend"
+    script: "setup-test-migrations.sh"
+    description: "Copying test migrations to backend"
+    timeout: 60
+    rollback_on_fail: true
+
+  - name: "run-data-migrations"
+    container: "infinibay-backend"
+    script: "run-data-migrations.sh"
+    description: "Running data migrations via orchestration system"
+    timeout: 120
+    rollback_on_fail: true
+    depends_on: ["setup-test-migrations"]
+
+  - name: "update-backend"
+    container: "infinibay-backend"
+    script: "update-backend.sh"
+    description: "Simulating backend update"
+    timeout: 60
+    depends_on: ["run-data-migrations"]
+    rollback_on_fail: true
+
+  - name: "update-frontend"
+    container: "infinibay-frontend"
+    script: "update-frontend.sh"
+    description: "Simulating frontend update"
+    timeout: 60
+    depends_on: ["update-backend"]
+    rollback_on_fail: true
+
+# Post-upgrade validation
+validation:
+  - name: "health-check"
+    script: "validate-health.sh"
+    critical: true
+
+  - name: "validate-migrations"
+    script: "validate-migrations.sh"
+    critical: true
+
+# Rollback strategy
+rollback:
+  automatic: true

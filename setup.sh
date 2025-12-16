@@ -66,16 +66,11 @@ check_kvm_support() {
             fi
             ;;
         rhel|suse)
-            # Use virt-host-validate on RHEL/SUSE-based systems
-            if ! command -v virt-host-validate &>/dev/null; then
-                log_warning "virt-host-validate not found. Installing libvirt-client..."
-                pkg_update
-                pkg_install cpu-checker
-            fi
-            if virt-host-validate qemu 2>&1 | grep -q "QEMU: Checking.*KVM.*PASS"; then
+            # Use lscpu on RHEL/SUSE-based systems
+            if lscpu | grep -q "Virtualization"; then
                 log_success "KVM acceleration available"
             else
-                log_warning "virt-host-validate shows warnings, but /dev/kvm exists"
+                log_warning "Could not detect virtualization via lscpu, but /dev/kvm exists"
                 log_success "KVM device found at /dev/kvm"
             fi
             ;;
@@ -425,8 +420,6 @@ install_dependencies() {
 
     # Install required packages
     PACKAGES=(
-        libvirt-daemon-system
-        libvirt-clients
         qemu-kvm
         cpu-checker
         bridge-utils
@@ -453,17 +446,6 @@ install_dependencies() {
             log_success "$package already installed"
         fi
     done
-
-    # Ensure libvirt is running
-    local LIBVIRT_SERVICE=$(get_service_name libvirt)
-    if systemctl is-active --quiet "$LIBVIRT_SERVICE"; then
-        log_success "libvirt already running"
-    else
-        log_info "Starting libvirt service..."
-        systemctl enable "$LIBVIRT_SERVICE"
-        systemctl start "$LIBVIRT_SERVICE"
-        log_success "libvirt service started"
-    fi
 
     log_success "System dependencies installed"
 }

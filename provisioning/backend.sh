@@ -1,6 +1,6 @@
 #!/bin/bash
 # Backend Provisioning Script for Infinibay
-# This script installs Node.js, Rust, libvirt and sets up the backend API
+# This script installs Node.js, QEMU, infinivirt and sets up the backend API
 
 set -e
 
@@ -22,9 +22,6 @@ pkg_install \
     build-essential \
     pkg-config \
     libssl-dev \
-    libvirt-dev \
-    libvirt-daemon-system \
-    libvirt-clients \
     qemu-kvm \
     qemu-utils \
     bridge-utils \
@@ -38,7 +35,7 @@ chmod 755 /opt/infinibay
 
 # Configure git to trust Infinibay directories
 git config --global --add safe.directory /opt/infinibay/backend
-git config --global --add safe.directory /opt/infinibay/libvirt-node
+git config --global --add safe.directory /opt/infinibay/infinivirt
 git config --global --add safe.directory /opt/infinibay/installer
 
 # Clone backend
@@ -51,14 +48,14 @@ else
     cd /opt/infinibay/backend && git pull
 fi
 
-# Clone libvirt-node (required for backend)
-if [ ! -d /opt/infinibay/libvirt-node/.git ]; then
-    echo "Cloning libvirt-node repository..."
-    git clone https://github.com/Infinibay/libvirt-node.git /opt/infinibay/libvirt-node
-    chmod -R 755 /opt/infinibay/libvirt-node
+# Clone infinivirt (required for backend)
+if [ ! -d /opt/infinibay/infinivirt/.git ]; then
+    echo "Cloning infinivirt repository..."
+    git clone https://github.com/Infinibay/infinivirt.git /opt/infinibay/infinivirt
+    chmod -R 755 /opt/infinibay/infinivirt
 else
-    echo "libvirt-node repository already exists, pulling latest changes..."
-    cd /opt/infinibay/libvirt-node && git pull
+    echo "infinivirt repository already exists, pulling latest changes..."
+    cd /opt/infinibay/infinivirt && git pull
 fi
 
 # Clone installer (for scripts and utilities)
@@ -84,56 +81,9 @@ npm --version
 # Create infinibay user if it doesn't exist
 if ! id -u infinibay > /dev/null 2>&1; then
     useradd -m -s /bin/bash infinibay
-    # Add infinibay user to libvirt and kvm groups
-    usermod -aG libvirt infinibay
+    # Add infinibay user to kvm group
     usermod -aG kvm infinibay
 fi
-
-# Install Rust for building native modules
-echo "Installing Rust..."
-if ! command -v rustc &> /dev/null; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source "$HOME/.cargo/env"
-fi
-
-# Make Rust available for infinibay user
-if [ ! -d /home/infinibay/.cargo ]; then
-    su - infinibay -c "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
-fi
-
-# Verify Rust installation
-su - infinibay -c "source ~/.cargo/env && rustc --version"
-
-# Configure libvirt
-echo "Configuring libvirt..."
-LIBVIRT_SERVICE=$(get_service_name libvirt)
-systemctl enable "$LIBVIRT_SERVICE"
-systemctl start "$LIBVIRT_SERVICE"
-
-# Configure libvirt to use /data for images
-# Create subdirectories for libvirt
-mkdir -p /data/libvirt/images /data/libvirt/networks
-chown -R libvirt-qemu:kvm /data/libvirt
-chmod 755 /data/libvirt
-
-# Update libvirt pool configuration
-virsh pool-destroy default 2>/dev/null || true
-virsh pool-undefine default 2>/dev/null || true
-
-# Create new default pool pointing to /data
-cat > /tmp/pool.xml << 'EOF'
-<pool type='dir'>
-  <name>default</name>
-  <target>
-    <path>/data/libvirt/images</path>
-  </target>
-</pool>
-EOF
-
-virsh pool-define /tmp/pool.xml
-virsh pool-start default
-virsh pool-autostart default
-rm /tmp/pool.xml
 
 # Verify KVM access
 echo "Verifying KVM access..."
@@ -146,7 +96,7 @@ else
 fi
 
 # Set up directories
-# Note: /data permissions already fixed earlier for libvirt
+# Note: /data permissions configured for infinibay user
 mkdir -p /data/logs /data/uploads /data/tmp
 chown -R infinibay:infinibay /data/logs /data/uploads /data/tmp
 
@@ -160,8 +110,8 @@ echo "✓ Wallpapers directory created"
 cat > /etc/systemd/system/infinibay-backend.service << EOF
 [Unit]
 Description=Infinibay Backend API
-After=network.target postgresql.service redis.service ${LIBVIRT_SERVICE}.service
-Wants=postgresql.service redis.service ${LIBVIRT_SERVICE}.service
+After=network.target postgresql.service redis.service
+Wants=postgresql.service redis.service
 
 [Service]
 Type=simple
@@ -199,7 +149,6 @@ DB_NAME=${DB_NAME:-infinibay}
 DB_USER=${DB_USER:-infinibay}
 DB_PASSWORD=${DB_PASSWORD:-changeme}
 HOST_IP=${HOST_IP:-192.168.0.1}
-LIBVIRT_NETWORK_NAME=${LIBVIRT_NETWORK_NAME:-default}
 TOKENKEY=${TOKENKEY:-changeme}
 
 # Create backend .env with LXD container networking
@@ -226,11 +175,7 @@ INFINIBAY_BASE_DIR=/opt/infinibay
 INFINIBAY_ISO_DIR=/opt/infinibay/iso
 INFINIBAY_ISO_TEMP_DIR=/opt/infinibay/iso/temp
 INFINIBAY_ISO_PERMANENT_DIR=/opt/infinibay/iso/permanent
-INFINIBAY_STORAGE_POOL_NAME=infinibay
 INFINIBAY_WALLPAPERS_DIR=/opt/infinibay/wallpapers
-
-# Libvirt Configuration
-LIBVIRT_NETWORK_NAME=${LIBVIRT_NETWORK_NAME}
 
 # RPC Configuration
 RPC_URL=http://localhost:9090
@@ -241,38 +186,41 @@ chown infinibay:infinibay /opt/infinibay/backend/.env
 chmod 600 /opt/infinibay/backend/.env
 echo "✓ Backend .env file created"
 
-# Build libvirt-node BEFORE installing backend dependencies
-echo "Building libvirt-node native module (this may take a few minutes)..."
+# Build infinivirt BEFORE installing backend dependencies
+echo "Building infinivirt (this may take a few minutes)..."
 
 # Change ownership to infinibay user so they can build
-chown -R infinibay:infinibay /opt/infinibay/libvirt-node
+chown -R infinibay:infinibay /opt/infinibay/infinivirt
 
 # Install dependencies and build as infinibay user
-su - infinibay -c "cd /opt/infinibay/libvirt-node && npm install"
-su - infinibay -c "source ~/.cargo/env && cd /opt/infinibay/libvirt-node && npm run build"
+echo "Installing infinivirt dependencies..."
+su - infinibay -c "cd /opt/infinibay/infinivirt && npm install"
+
+echo "Compiling infinivirt TypeScript..."
+su - infinibay -c "cd /opt/infinibay/infinivirt && npm run build"
 
 # Verify the build succeeded
-if ls /opt/infinibay/libvirt-node/libvirt*.node 1> /dev/null 2>&1; then
-    echo "✓ libvirt-node native module built successfully:"
-    ls -lh /opt/infinibay/libvirt-node/libvirt*.node
+if [ -f /opt/infinibay/infinivirt/dist/index.js ]; then
+    echo "✓ infinivirt built successfully:"
+    ls -lh /opt/infinibay/infinivirt/dist/index.js
 else
-    echo "✗ ERROR: libvirt-node native module build failed - .node file not found"
+    echo "✗ ERROR: infinivirt build failed - dist/index.js not found"
     exit 1
 fi
 
-# Package libvirt-node for backend consumption
-echo "Packaging libvirt-node..."
-cd /opt/infinibay/libvirt-node && npm pack
-TARBALL=$(ls /opt/infinibay/libvirt-node/infinibay-libvirt-node-*.tgz 2>/dev/null)
-if [ -z "$TARBALL" ]; then
-    echo "✗ ERROR: Failed to create libvirt-node tarball"
+# Install nftables systemd service
+echo "Installing infinivirt nftables service..."
+cd /opt/infinibay/infinivirt/systemd
+./install-service.sh
+
+if systemctl is-enabled infinivirt-nftables.service > /dev/null 2>&1; then
+    echo "✓ infinivirt-nftables service installed and enabled"
+else
+    echo "✗ ERROR: Failed to install infinivirt-nftables service"
     exit 1
 fi
 
-# Create lib directory in backend and move tarball
-mkdir -p /opt/infinibay/backend/lib/libvirt-node
-cp "$TARBALL" /opt/infinibay/backend/lib/libvirt-node/infinibay-libvirt-node-0.0.1.tgz
-echo "✓ libvirt-node packaged and ready for backend"
+echo "✓ infinivirt installation complete"
 
 # Install backend npm dependencies
 echo "Installing backend dependencies..."
@@ -280,14 +228,7 @@ echo "Installing backend dependencies..."
 # Change ownership to infinibay user
 chown -R infinibay:infinibay /opt/infinibay/backend
 
-# Remove package-lock.json to avoid integrity checksum conflicts with libvirt-node tarball
-# The checksum in package-lock.json is from an old build, but we just created a fresh tarball
-if [ -f /opt/infinibay/backend/package-lock.json ]; then
-    echo "Removing old package-lock.json to regenerate with fresh libvirt-node tarball..."
-    rm /opt/infinibay/backend/package-lock.json
-fi
-
-# Install as infinibay user (will regenerate package-lock.json)
+# Install as infinibay user
 # Note: We need devDependencies to build TypeScript
 su - infinibay -c "cd /opt/infinibay/backend && npm install"
 
@@ -423,15 +364,13 @@ echo ""
 echo "Backend provisioning completed!"
 echo "Node.js version: $(node --version)"
 echo "npm version: $(npm --version)"
-echo "Rust version: $(su - infinibay -c 'source ~/.cargo/env && rustc --version')"
-echo "Libvirt version: $(virsh --version)"
 echo ""
 echo "KVM status:"
 kvm-ok 2>/dev/null || echo "kvm-ok not available, checking manually..."
 [ -c /dev/kvm ] && echo "✓ /dev/kvm is accessible" || echo "✗ /dev/kvm not accessible"
 echo ""
-echo "Libvirt storage pool:"
-virsh pool-list
+echo "Infinivirt status:"
+systemctl status infinivirt-nftables.service --no-pager || echo "infinivirt-nftables service not started (will start on boot)"
 echo ""
 echo "Service has been started and enabled to run on boot."
 echo ""

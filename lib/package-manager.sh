@@ -140,9 +140,9 @@ map_package_name() {
         cpu-checker)
             case "$OS_FAMILY" in
                 debian) echo "cpu-checker" ;;
-                rhel) echo "libvirt-client" ;; # virt-host-validate comes with libvirt-client
-                arch) echo "libvirt" ;; # Included in libvirt package
-                suse) echo "libvirt-client" ;; # virt-host-validate comes with libvirt-client
+                rhel) echo "" ;;  # Not needed, using lscpu
+                arch) echo "" ;;  # Not needed, using lscpu
+                suse) echo "" ;;  # Not needed, using lscpu
                 *) echo "" ;;
             esac
             ;;
