@@ -1,6 +1,6 @@
 #!/bin/bash
 # Backend Provisioning Script for Infinibay
-# This script installs Node.js, QEMU, infinivirt and sets up the backend API
+# This script installs Node.js, QEMU, infinization and sets up the backend API
 
 set -e
 
@@ -35,7 +35,7 @@ chmod 755 /opt/infinibay
 
 # Configure git to trust Infinibay directories
 git config --global --add safe.directory /opt/infinibay/backend
-git config --global --add safe.directory /opt/infinibay/infinivirt
+git config --global --add safe.directory /opt/infinibay/infinization
 git config --global --add safe.directory /opt/infinibay/installer
 
 # Clone backend
@@ -48,14 +48,14 @@ else
     cd /opt/infinibay/backend && git pull
 fi
 
-# Clone infinivirt (required for backend)
-if [ ! -d /opt/infinibay/infinivirt/.git ]; then
-    echo "Cloning infinivirt repository..."
-    git clone https://github.com/Infinibay/infinivirt.git /opt/infinibay/infinivirt
-    chmod -R 755 /opt/infinibay/infinivirt
+# Clone infinization (required for backend)
+if [ ! -d /opt/infinibay/infinization/.git ]; then
+    echo "Cloning infinization repository..."
+    git clone https://github.com/Infinibay/infinization.git /opt/infinibay/infinization
+    chmod -R 755 /opt/infinibay/infinization
 else
-    echo "infinivirt repository already exists, pulling latest changes..."
-    cd /opt/infinibay/infinivirt && git pull
+    echo "infinization repository already exists, pulling latest changes..."
+    cd /opt/infinibay/infinization && git pull
 fi
 
 # Clone installer (for scripts and utilities)
@@ -186,41 +186,41 @@ chown infinibay:infinibay /opt/infinibay/backend/.env
 chmod 600 /opt/infinibay/backend/.env
 echo "✓ Backend .env file created"
 
-# Build infinivirt BEFORE installing backend dependencies
-echo "Building infinivirt (this may take a few minutes)..."
+# Build infinization BEFORE installing backend dependencies
+echo "Building infinization (this may take a few minutes)..."
 
 # Change ownership to infinibay user so they can build
-chown -R infinibay:infinibay /opt/infinibay/infinivirt
+chown -R infinibay:infinibay /opt/infinibay/infinization
 
 # Install dependencies and build as infinibay user
-echo "Installing infinivirt dependencies..."
-su - infinibay -c "cd /opt/infinibay/infinivirt && npm install"
+echo "Installing infinization dependencies..."
+su - infinibay -c "cd /opt/infinibay/infinization && npm install"
 
-echo "Compiling infinivirt TypeScript..."
-su - infinibay -c "cd /opt/infinibay/infinivirt && npm run build"
+echo "Compiling infinization TypeScript..."
+su - infinibay -c "cd /opt/infinibay/infinization && npm run build"
 
 # Verify the build succeeded
-if [ -f /opt/infinibay/infinivirt/dist/index.js ]; then
-    echo "✓ infinivirt built successfully:"
-    ls -lh /opt/infinibay/infinivirt/dist/index.js
+if [ -f /opt/infinibay/infinization/dist/index.js ]; then
+    echo "✓ infinization built successfully:"
+    ls -lh /opt/infinibay/infinization/dist/index.js
 else
-    echo "✗ ERROR: infinivirt build failed - dist/index.js not found"
+    echo "✗ ERROR: infinization build failed - dist/index.js not found"
     exit 1
 fi
 
 # Install nftables systemd service
-echo "Installing infinivirt nftables service..."
-cd /opt/infinibay/infinivirt/systemd
+echo "Installing infinization nftables service..."
+cd /opt/infinibay/infinization/systemd
 ./install-service.sh
 
-if systemctl is-enabled infinivirt-nftables.service > /dev/null 2>&1; then
-    echo "✓ infinivirt-nftables service installed and enabled"
+if systemctl is-enabled infinization-nftables.service > /dev/null 2>&1; then
+    echo "✓ infinization-nftables service installed and enabled"
 else
-    echo "✗ ERROR: Failed to install infinivirt-nftables service"
+    echo "✗ ERROR: Failed to install infinization-nftables service"
     exit 1
 fi
 
-echo "✓ infinivirt installation complete"
+echo "✓ infinization installation complete"
 
 # Install backend npm dependencies
 echo "Installing backend dependencies..."
@@ -369,8 +369,8 @@ echo "KVM status:"
 kvm-ok 2>/dev/null || echo "kvm-ok not available, checking manually..."
 [ -c /dev/kvm ] && echo "✓ /dev/kvm is accessible" || echo "✗ /dev/kvm not accessible"
 echo ""
-echo "Infinivirt status:"
-systemctl status infinivirt-nftables.service --no-pager || echo "infinivirt-nftables service not started (will start on boot)"
+echo "Infinization status:"
+systemctl status infinization-nftables.service --no-pager || echo "infinization-nftables service not started (will start on boot)"
 echo ""
 echo "Service has been started and enabled to run on boot."
 echo ""
