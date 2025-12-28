@@ -118,7 +118,7 @@ check_services() {
     log_info "Checking services..."
 
     # Check containers are running
-    for container in infinibay-postgres infinibay-redis infinibay-backend infinibay-frontend; do
+    for container in infinibay-postgres infinibay-backend infinibay-frontend; do
         local status
         status=$(lxc list "$container" --format=csv -c s 2>/dev/null || echo "MISSING")
 
@@ -138,13 +138,6 @@ check_database() {
         log_success "Database: PostgreSQL connection successful"
     else
         log_error "Database: PostgreSQL connection failed"
-    fi
-
-    # Check Redis
-    if lxc exec infinibay-redis -- redis-cli ping > /dev/null 2>&1; then
-        log_success "Database: Redis connection successful"
-    else
-        log_error "Database: Redis connection failed"
     fi
 }
 

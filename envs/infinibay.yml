@@ -19,9 +19,6 @@ projects:
           DB_PASSWORD: "{{ .Values.DB_PASSWORD }}"
           DB_HOST: "infinibay-postgres"
           DB_PORT: "{{ .Values.DB_PORT }}"
-          REDIS_HOST: "infinibay-redis"
-          REDIS_PORT: "{{ .Values.REDIS_PORT }}"
-          REDIS_ENABLED: "{{ .Values.REDIS_ENABLED }}"
           HOST_IP: "{{ .Values.HOST_IP }}"
           BACKEND_PORT: "{{ .Values.BACKEND_PORT }}"
           FRONTEND_PORT: "{{ .Values.FRONTEND_PORT }}"
@@ -62,27 +59,6 @@ projects:
             #     commands:
             #       - apt-get update
             #       - apt-get install -y postgresql postgresql-contrib
-
-      # Redis Cache
-      - name: "cache"
-        description: "Redis Cache"
-        connection: "local"
-
-        common_profiles:
-          - default
-          - infinibay-base
-
-        nodes:
-          - name: "infinibay-redis"
-            image_source: "22.04"
-            image_remote_server: "ubuntu"
-
-            profiles:
-              - infinibay-redis
-
-            config:
-              limits.memory: "{{ .Values.REDIS_MEMORY_LIMIT }}"
-              limits.cpu: 1
 
       # Backend API
       - name: "backend"

@@ -304,7 +304,6 @@ create_data_directories() {
 
     mkdir -p /var/lib/infinibay/data/{isos,disks,wallpapers,sockets}
     mkdir -p /var/lib/infinibay/postgres-data
-    mkdir -p /var/lib/infinibay/redis-data
 
     chmod 755 /var/lib/infinibay
     chmod 755 /var/lib/infinibay/data

@@ -156,9 +156,6 @@ cat > /opt/infinibay/backend/.env << EOF
 # Database Configuration (using LXD container name)
 DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@infinibay-postgres:5432/${DB_NAME}?schema=public
 
-# Redis Configuration (using LXD container name)
-REDIS_URL=redis://infinibay-redis:6379
-
 # Application Configuration
 NODE_ENV=production
 PORT=4000

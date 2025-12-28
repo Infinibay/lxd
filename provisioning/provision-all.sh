@@ -74,14 +74,11 @@ fi
 echo -e "${GREEN}All containers are running${NC}"
 echo ""
 
-# Provision in order (database first, then cache, then services)
-echo -e "${YELLOW}Step 1/4: Provisioning PostgreSQL...${NC}"
+# Provision in order (database first, then services)
+echo -e "${YELLOW}Step 1/3: Provisioning PostgreSQL...${NC}"
 provision_container "infinibay-postgres" "postgres.sh"
 
-echo -e "${YELLOW}Step 2/4: Provisioning Redis...${NC}"
-provision_container "infinibay-redis" "redis.sh"
-
-echo -e "${YELLOW}Step 3/4: Provisioning Backend...${NC}"
+echo -e "${YELLOW}Step 2/3: Provisioning Backend...${NC}"
 provision_container "infinibay-backend" "backend.sh"
 
 # Copy wallpapers to backend container after provisioning
@@ -101,7 +98,7 @@ else
     echo -e "${YELLOW}⚠ Warning: Wallpapers directory not found at $INFINIBAY_DIR/wallpapers${NC}"
 fi
 
-echo -e "${YELLOW}Step 4/4: Provisioning Frontend...${NC}"
+echo -e "${YELLOW}Step 3/3: Provisioning Frontend...${NC}"
 # Detect HOST IP (not container IP) since ports are proxied to host
 # Get the IP of the default route interface (usually the main network interface)
 HOST_IP=""
@@ -133,14 +130,6 @@ else
     HEALTH_FAILED=true
 fi
 
-# Redis Health Check
-if lxc exec infinibay-redis -- redis-cli ping > /dev/null 2>&1; then
-    echo -e "${GREEN}✓ Redis is responding${NC}"
-else
-    echo -e "${RED}✗ Redis is not responding${NC}"
-    HEALTH_FAILED=true
-fi
-
 # Backend Service Health Check
 if lxc exec infinibay-backend -- systemctl is-active --quiet infinibay-backend; then
     echo -e "${GREEN}✓ Backend service is running${NC}"
@@ -160,7 +149,6 @@ fi
 echo ""
 echo -e "${BLUE}=== Provisioning Status Summary ===${NC}"
 echo -e "  infinibay-postgres:  $(get_provisioning_status 'infinibay-postgres')"
-echo -e "  infinibay-redis:     $(get_provisioning_status 'infinibay-redis')"
 echo -e "  infinibay-backend:   $(get_provisioning_status 'infinibay-backend')"
 echo -e "  infinibay-frontend:  $(get_provisioning_status 'infinibay-frontend')"
 echo ""

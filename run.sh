@@ -126,17 +126,17 @@ setup_profiles() {
 # Function to ensure data directories exist
 ensure_data_dirs() {
     echo -e "${BLUE}Ensuring data directories exist...${NC}"
-    mkdir -p "$INFINIBAY_DIR/data"/{postgres,redis,backend,frontend}
+    mkdir -p "$INFINIBAY_DIR/data"/{postgres,backend,frontend}
     # Set permissions so containers can write to these directories
     # LXD uses user namespaces, so we need to make directories writable
-    chmod 777 "$INFINIBAY_DIR/data"/{postgres,redis,backend,frontend}
+    chmod 777 "$INFINIBAY_DIR/data"/{postgres,backend,frontend}
     echo -e "${GREEN}Data directories ready${NC}"
 }
 
 # Helper function to check if infinibay environment exists
-# Verifies that all four expected containers exist
+# Verifies that all three expected containers exist
 check_environment_exists() {
-    local containers=("infinibay-postgres" "infinibay-redis" "infinibay-backend" "infinibay-frontend")
+    local containers=("infinibay-postgres" "infinibay-backend" "infinibay-frontend")
     set +e
     local all_exist=0
 
@@ -154,7 +154,7 @@ check_environment_exists() {
 
 # Helper function to check if all containers are running
 check_containers_running() {
-    local containers=("infinibay-postgres" "infinibay-redis" "infinibay-backend" "infinibay-frontend")
+    local containers=("infinibay-postgres" "infinibay-backend" "infinibay-frontend")
     set +e
     local all_running=0
 
@@ -173,7 +173,7 @@ check_containers_running() {
 # Helper function to check if containers are provisioned
 # Uses LXD metadata-based provisioning state tracking
 check_provisioned() {
-    local containers=("infinibay-postgres" "infinibay-redis" "infinibay-backend" "infinibay-frontend")
+    local containers=("infinibay-postgres" "infinibay-backend" "infinibay-frontend")
     set +e
     local all_provisioned=0
 
@@ -190,7 +190,7 @@ check_provisioned() {
 
 # Helper function to ensure containers are running
 ensure_containers_running() {
-    local containers=("infinibay-postgres" "infinibay-redis" "infinibay-backend" "infinibay-frontend")
+    local containers=("infinibay-postgres" "infinibay-backend" "infinibay-frontend")
     local has_missing=0
 
     echo -e "${BLUE}Checking container states...${NC}"
@@ -337,46 +337,6 @@ stop_backend_container() {
     fi
 }
 
-# Helper function to stop redis container
-stop_redis_container() {
-    local force_mode=$1
-
-    echo -e "${BLUE}Stopping redis container...${NC}"
-
-    set +e
-    local state=$(sg lxd -c "lxc list infinibay-redis --format=csv -c s" 2>/dev/null)
-    set -e
-
-    if [[ -z "$state" ]]; then
-        echo -e "  ${YELLOW}Redis container does not exist${NC}"
-        return 0
-    fi
-
-    if [[ "$state" != "RUNNING" ]]; then
-        echo -e "  ${YELLOW}Redis container is already stopped${NC}"
-        return 0
-    fi
-
-    # Redis doesn't have a systemd service in current setup, just stop container
-    # Use timeout to allow Redis to flush to disk
-    set +e
-    if [[ "$force_mode" == "true" ]]; then
-        sg lxd -c "lxc stop infinibay-redis --force"
-    else
-        sg lxd -c "lxc stop infinibay-redis --timeout 30"
-    fi
-    local exit_code=$?
-    set -e
-
-    if [[ $exit_code -eq 0 ]]; then
-        echo -e "  ${GREEN}Redis container stopped successfully${NC}"
-        return 0
-    else
-        echo -e "  ${RED}Failed to stop redis container${NC}"
-        return 1
-    fi
-}
-
 # Helper function to stop postgres container
 stop_postgres_container() {
     local force_mode=$1
@@ -502,18 +462,13 @@ stop_all_containers() {
     # Track failures
     local has_failure=0
 
-    # Stop containers in reverse order: frontend → backend → redis → postgres
+    # Stop containers in reverse order: frontend → backend → postgres
     if ! stop_frontend_container "$force_mode"; then
         has_failure=1
     fi
     echo ""
 
     if ! stop_backend_container "$force_mode"; then
-        has_failure=1
-    fi
-    echo ""
-
-    if ! stop_redis_container "$force_mode"; then
         has_failure=1
     fi
     echo ""
@@ -567,7 +522,6 @@ smart_default() {
     if ! check_provisioned; then
         echo -e "${YELLOW}Containers not provisioned. Current status:${NC}"
         echo -e "  infinibay-postgres:  $(get_provisioning_status 'infinibay-postgres')"
-        echo -e "  infinibay-redis:     $(get_provisioning_status 'infinibay-redis')"
         echo -e "  infinibay-backend:   $(get_provisioning_status 'infinibay-backend')"
         echo -e "  infinibay-frontend:  $(get_provisioning_status 'infinibay-frontend')"
         echo -e "${YELLOW}Running provisioning...${NC}"
@@ -1391,17 +1345,16 @@ case "${1:-}" in
         # ========================================
         # Phase 3: Verification & Cleanup
         # ========================================
-        start_phase "Phase 3: Health Checks" 4
+        start_phase "Phase 3: Health Checks" 3
         display_time_estimate "health-check"
 
         # Run comprehensive health checks
         update_step 1 "Running PostgreSQL health check" "in-progress"
-        update_step 2 "Running Redis health check" "in-progress"
-        update_step 3 "Running Backend health check" "in-progress"
-        update_step 4 "Running Frontend health check" "in-progress"
+        update_step 2 "Running Backend health check" "in-progress"
+        update_step 3 "Running Frontend health check" "in-progress"
 
         if ! run_all_health_checks; then
-            update_step 4 "Running health checks" "failed"
+            update_step 3 "Running health checks" "failed"
             display_rollback_notice "$BACKUP_PATH"
             error_health_check_failed "system" "$BACKUP_PATH"
             rollback_to_backup "$BACKUP_PATH"
@@ -1409,9 +1362,8 @@ case "${1:-}" in
         fi
 
         update_step 1 "PostgreSQL health check" "complete"
-        update_step 2 "Redis health check" "complete"
-        update_step 3 "Backend health check" "complete"
-        update_step 4 "Frontend health check" "complete"
+        update_step 2 "Backend health check" "complete"
+        update_step 3 "Frontend health check" "complete"
 
         phase_summary "Phase 3: Health Checks" "$PROGRESS_PHASE_START_TIME" "success"
 
@@ -2136,7 +2088,7 @@ case "${1:-}" in
         echo -e "    1. libvirt-node: Pull → Build Rust → Package → Copy to backend"
         echo -e "    2. backend: Pull → Install deps → Build → Migrate DB → Restart"
         echo -e "    3. frontend: Pull → Install deps → Codegen → Build → Restart"
-        echo -e "  ${CYAN}Phase 3:${NC} Run health checks (postgres, redis, backend, frontend)"
+        echo -e "  ${CYAN}Phase 3:${NC} Run health checks (postgres, backend, frontend)"
         echo ""
         echo -e "${YELLOW}When to Use:${NC}"
         echo -e "  • Regular updates with non-breaking changes"
@@ -2334,7 +2286,7 @@ case "${1:-}" in
         echo -e "  ${GREEN}$0 d${NC}                   # Destroy everything"
         echo ""
         echo -e "${BLUE}Container Names:${NC}"
-        echo -e "  postgres, redis, backend, frontend"
+        echo -e "  postgres, backend, frontend"
         echo ""
         echo -e "${GREEN}After setup, access:${NC}"
         echo -e "  Frontend: ${BLUE}http://localhost:3000${NC}"

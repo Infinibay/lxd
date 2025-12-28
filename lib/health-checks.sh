@@ -39,33 +39,6 @@ check_postgres_health() {
 }
 
 ################################################################################
-# check_redis_health
-#
-# Verifies Redis cache is responding to commands
-# Returns: 0 if healthy, 1 if failed
-################################################################################
-check_redis_health() {
-    local start_time=$(date +%s)
-    echo -e "${BLUE}[check_redis_health]${NC} Checking Redis cache..."
-
-    local response=""
-    local result=0
-    response=$(timeout ${HEALTH_CHECK_TIMEOUT} sg lxd -c "lxc exec infinibay-redis -- redis-cli ping" 2>/dev/null) || result=$?
-
-    local duration=$(($(date +%s) - start_time))
-
-    if [ $result -eq 0 ] && [ "$response" = "PONG" ]; then
-        echo -e "${GREEN}[check_redis_health]${NC} ✓ Redis is healthy (${duration}s)"
-        return 0
-    else
-        echo -e "${RED}[check_redis_health]${NC} ✗ Redis health check failed"
-        echo -e "${YELLOW}[check_redis_health]${NC} Hint: Check Redis logs with:"
-        echo -e "${YELLOW}[check_redis_health]${NC}   lxc exec infinibay-redis -- journalctl -u redis -n 50"
-        return 1
-    fi
-}
-
-################################################################################
 # check_backend_health
 #
 # Verifies backend service is running and GraphQL endpoint is responding
@@ -162,18 +135,12 @@ run_all_health_checks() {
     local failed_checks=0
     local failed_check_names=()
 
-    # Run checks in dependency order: PostgreSQL → Redis → Backend → Frontend
+    # Run checks in dependency order: PostgreSQL → Backend → Frontend
     set +e
 
     if ! check_postgres_health; then
         ((failed_checks++))
         failed_check_names+=("PostgreSQL")
-    fi
-    echo ""
-
-    if ! check_redis_health; then
-        ((failed_checks++))
-        failed_check_names+=("Redis")
     fi
     echo ""
 
@@ -194,11 +161,11 @@ run_all_health_checks() {
     # Print summary
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
     if [ $failed_checks -eq 0 ]; then
-        echo -e "${GREEN}✓ All health checks passed (4/4)${NC}"
+        echo -e "${GREEN}✓ All health checks passed (3/3)${NC}"
         echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
         return 0
     else
-        echo -e "${RED}✗ Health checks failed: ${failed_checks}/4 check(s) failed${NC}"
+        echo -e "${RED}✗ Health checks failed: ${failed_checks}/3 check(s) failed${NC}"
         echo -e "${RED}  Failed checks: ${failed_check_names[*]}${NC}"
         echo -e "${BLUE}═══════════════════════════════════════════════════════════════${NC}"
         return 1

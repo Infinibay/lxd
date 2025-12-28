@@ -137,7 +137,7 @@ check_prerequisites() {
     fi
 
     # Check containers are running
-    for container in infinibay-postgres infinibay-redis infinibay-backend infinibay-frontend; do
+    for container in infinibay-postgres infinibay-backend infinibay-frontend; do
         STATUS=$(lxc list "$container" --format=csv -c s 2>/dev/null || echo "MISSING")
         if [[ "$STATUS" != "RUNNING" ]]; then
             log_error "Container $container is not running (status: $STATUS)"
@@ -264,7 +264,7 @@ get_version() {
 
 # Check if services are healthy
 check_services_healthy() {
-    for container in infinibay-postgres infinibay-redis infinibay-backend infinibay-frontend; do
+    for container in infinibay-postgres infinibay-backend infinibay-frontend; do
         STATUS=$(lxc list "$container" --format=csv -c s 2>/dev/null || echo "MISSING")
         if [[ "$STATUS" != "RUNNING" ]]; then
             return 1

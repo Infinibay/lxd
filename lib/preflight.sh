@@ -35,7 +35,7 @@ readonly NC='\033[0m' # No Color
 preflight_check_containers_running() {
     echo -e "${BLUE}Checking container status...${NC}"
 
-    local containers=("infinibay-postgres" "infinibay-redis" "infinibay-backend" "infinibay-frontend")
+    local containers=("infinibay-postgres" "infinibay-backend" "infinibay-frontend")
     local all_running=0
     local stopped_containers=()
 

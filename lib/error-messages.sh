@@ -318,7 +318,7 @@ error_preflight_failed() {
 # error_health_check_failed - Display health check failure message
 #
 # Arguments:
-#   $1 - Service name: "postgres", "redis", "backend", "frontend"
+#   $1 - Service name: "postgres", "backend", "frontend"
 #   $2 - Backup path for rollback reference (optional)
 #
 # Example:
@@ -340,11 +340,6 @@ error_health_check_failed() {
             echo "  This could indicate a startup failure, configuration issue,"
             echo "  or resource exhaustion."
             ;;
-        redis|cache)
-            echo "  The Redis cache service is not responding correctly."
-            echo "  The backend can operate without Redis (with reduced performance)"
-            echo "  but this should be investigated."
-            ;;
         backend|api)
             echo "  The backend API service is not responding to requests."
             echo "  This typically means the Node.js server failed to start"
@@ -357,7 +352,7 @@ error_health_check_failed() {
             ;;
         system|services|all)
             echo "  One or more Infinibay services failed health checks."
-            echo "  This could affect database, cache, backend, or frontend services."
+            echo "  This could affect database, backend, or frontend services."
             echo "  Check individual service logs for specific failures."
             ;;
         *)
@@ -375,12 +370,6 @@ error_health_check_failed() {
             echo "  3. Port conflict (5432 in use)"
             echo "  4. Corrupted data files"
             echo "  5. Authentication configuration issues"
-            ;;
-        redis|cache)
-            echo "  1. Memory exhaustion"
-            echo "  2. Port conflict (6379 in use)"
-            echo "  3. Configuration file errors"
-            echo "  4. Persistence issues (RDB/AOF)"
             ;;
         backend|api)
             echo "  1. Missing environment variables"
@@ -420,14 +409,6 @@ error_health_check_failed() {
             echo -e "  ${DIM}# Test connection${NC}"
             echo -e "  lxc exec infinibay-postgres -- su - postgres -c \"psql -c 'SELECT 1'\""
             ;;
-        redis|cache)
-            echo -e "  ${DIM}# Check service status${NC}"
-            echo -e "  lxc exec infinibay-redis -- systemctl status redis"
-            echo -e "  ${DIM}# Check logs${NC}"
-            echo -e "  lxc exec infinibay-redis -- journalctl -u redis -n 50"
-            echo -e "  ${DIM}# Test connection${NC}"
-            echo -e "  lxc exec infinibay-redis -- redis-cli ping"
-            ;;
         backend|api)
             echo -e "  ${DIM}# Check service status${NC}"
             echo -e "  lxc exec infinibay-backend -- systemctl status infinibay-backend"
@@ -449,7 +430,6 @@ error_health_check_failed() {
             echo -e "  ./run.sh status"
             echo -e "  ${DIM}# Check individual services${NC}"
             echo -e "  lxc exec infinibay-postgres -- systemctl status postgresql"
-            echo -e "  lxc exec infinibay-redis -- systemctl status redis"
             echo -e "  lxc exec infinibay-backend -- systemctl status infinibay-backend"
             echo -e "  lxc exec infinibay-frontend -- systemctl status infinibay-frontend"
             echo -e "  ${DIM}# View all logs${NC}"

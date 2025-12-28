@@ -314,7 +314,7 @@ validate_manifest() {
     local -a step_names=()
 
     # Validate container names and field-level validation for steps
-    local valid_containers=("infinibay-backend" "infinibay-frontend" "infinibay-postgres" "infinibay-redis")
+    local valid_containers=("infinibay-backend" "infinibay-frontend" "infinibay-postgres")
     for step_json in "${MANIFEST_STEPS[@]}"; do
         local step_name step_script step_timeout step_rollback_on_fail container
 

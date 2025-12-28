@@ -38,7 +38,7 @@ fi
 
 # Check 4: Verify containers are running
 echo "Checking container status..."
-for container in infinibay-postgres infinibay-redis infinibay-backend infinibay-frontend; do
+for container in infinibay-postgres infinibay-backend infinibay-frontend; do
     STATUS=$(lxc list "$container" --format=csv -c s 2>/dev/null || echo "MISSING")
     if [ "$STATUS" != "RUNNING" ]; then
         echo "ERROR: Container $container is not running (status: $STATUS)"
