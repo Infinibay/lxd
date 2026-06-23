@@ -56,9 +56,11 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: "4000"
-      # Hot-reload restarts skip full type-checking (faster, and a stray type
-      # error in the loaded graph / infinization dist types won't block boot).
-      TS_NODE_TRANSPILE_ONLY: "1"
+      # NOTE: do NOT enable TS_NODE_TRANSPILE_ONLY here. The backend uses
+      # TypeGraphQL, which infers GraphQL types from cross-file decorator
+      # reflection metadata; single-file transpilation emits `Object` for
+      # imported types and resolvers throw NoExplicitTypeError at boot. Full
+      # type-checking (the default) is required, even though restarts are slower.
       DATABASE_URL: postgresql://${POSTGRES_USER:-infinibay}:${POSTGRES_PASSWORD:-infinibay}@postgres:5432/${POSTGRES_DB:-infinibay}?schema=public
       # pg_isready wait (entrypoint)
       PGHOST: postgres

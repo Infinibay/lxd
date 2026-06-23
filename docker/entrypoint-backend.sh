@@ -5,8 +5,10 @@
 # Mirrors the LXD provisioning steps (infinization built in-place with
 # `npm install && npm run build`, then backend install + prisma + start).
 # Difference: LXD runs pre-compiled JS (`node dist/index.js`); here we run ts-node
-# under nodemon for hot reload, in transpile-only mode (TS_NODE_TRANSPILE_ONLY=1,
-# set in compose) so a stray type error doesn't block the dev boot.
+# under nodemon for hot reload. Full type-checking is kept ON (no transpile-only):
+# TypeGraphQL infers GraphQL types from cross-file reflection metadata that
+# single-file transpilation can't emit, so transpile-only makes resolvers throw
+# NoExplicitTypeError at boot. Restarts are therefore a bit slower but correct.
 # Idempotent: skips installs when node_modules is already populated in its volume.
 set -uo pipefail
 
