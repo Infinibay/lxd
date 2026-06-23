@@ -1,7 +1,11 @@
 # Environment variables and values (contains passwords)
 .env
+.env.docker
 values.yml
 TESTING.md
+
+# Docker dev path: repos are cloned here and bind-mounted (not committed)
+/repos/
 
 # Temporary files
 *.tmp

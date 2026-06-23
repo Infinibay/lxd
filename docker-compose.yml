@@ -1,0 +1,168 @@
+# Infinibay — Docker dev stack (hot-reload, for Mac / any Docker host)
+#
+# This is the SIMPLE developer environment. It does NOT replace the LXD
+# production path (setup.sh / run.sh); it lives alongside it.
+#
+# Source code is git-cloned by ./dev.sh into ${REPOS_DIR} (default ./repos) and
+# BIND-MOUNTED into the containers, so edits on your host are picked up live:
+#   - backend   : ts-node under nodemon  → restarts on change
+#   - frontend  : next dev               → hot module reload
+#   - infinization : tsc --watch (inside the backend container) → rebuilds dist/
+#
+# node_modules / dist / .next live in NAMED VOLUMES (never on your host and
+# never clobbering the bind mount), so native modules match the Linux container.
+#
+# Bring it up with ./dev.sh up  (or `make up`), which always passes
+#   --env-file .env.docker  so this never collides with the LXD .env.
+#
+# KVM NOTE: actually launching VMs needs /dev/kvm, which Docker Desktop on Mac
+# does not expose. The control plane (GraphQL API, pools, DB, UI) runs fine;
+# VM create/start works only on a Linux KVM host via docker-compose.kvm.yml.
+
+name: infinibay-dev
+
+x-npm-age: &npm-age "0" # neutralise .npmrc minimum-release-age for dev installs
+
+services:
+  postgres:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-infinibay}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-infinibay}
+      POSTGRES_DB: ${POSTGRES_DB:-infinibay}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-infinibay} -d ${POSTGRES_DB:-infinibay}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    # Dockerfile lives IN the backend repo (multi-stage); we build its dev target.
+    build:
+      context: ${REPOS_DIR:-./repos}/backend
+      target: dev
+    image: infinibay/dev-backend
+    restart: unless-stopped
+    init: true
+    working_dir: /workspace/backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: "4000"
+      # Hot-reload restarts skip full type-checking (faster, and a stray type
+      # error in the loaded graph / infinization dist types won't block boot).
+      TS_NODE_TRANSPILE_ONLY: "1"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-infinibay}:${POSTGRES_PASSWORD:-infinibay}@postgres:5432/${POSTGRES_DB:-infinibay}?schema=public
+      # pg_isready wait (entrypoint)
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-infinibay}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-infinibay}
+      PGDATABASE: ${POSTGRES_DB:-infinibay}
+      # auth / app
+      TOKENKEY: ${TOKENKEY:-dev-insecure-change-me}
+      ALLOW_INSECURE_JWT_FALLBACK: "1"
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-10}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+      FRONTEND_URL: ${FRONTEND_URL:-*}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # host advertised to VMs (SPICE/graphics + asset fetch). localhost in dev.
+      APP_HOST: ${APP_HOST:-localhost}
+      GRAPHIC_HOST: ${GRAPHIC_HOST:-localhost}
+      RPC_URL: ${RPC_URL:-http://localhost:9090}
+      # filesystem roots (shared infinibay_base volume)
+      INFINIBAY_BASE_DIR: /opt/infinibay
+      # optional admin bootstrap consumed by the seed if present
+      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@infinibay.local}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-admin12345}
+      # dev ergonomics
+      RUN_SEED: ${RUN_SEED:-true}
+      CHOKIDAR_USEPOLLING: "true"
+      NPM_CONFIG_MINIMUM_RELEASE_AGE: *npm-age
+    ports:
+      - "${BACKEND_PORT:-4000}:4000"
+    volumes:
+      - ${REPOS_DIR:-./repos}/backend:/workspace/backend
+      - ${REPOS_DIR:-./repos}/infinization:/workspace/infinization
+      - ./docker:/workspace/scripts:ro
+      - backend_node_modules:/workspace/backend/node_modules
+      - infinization_node_modules:/workspace/infinization/node_modules
+      - infinization_dist:/workspace/infinization/dist
+      - infinibay_base:/opt/infinibay
+    command: ["bash", "/workspace/scripts/entrypoint-backend.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:4000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 600s # first boot installs deps + builds infinization
+
+  frontend:
+    # Dockerfile lives IN the frontend repo (multi-stage); we build its dev target.
+    build:
+      context: ${REPOS_DIR:-./repos}/frontend
+      target: dev
+    image: infinibay/dev-frontend
+    restart: unless-stopped
+    init: true
+    working_dir: /workspace/frontend
+    depends_on:
+      - backend # started, not healthy: let the UI install in parallel
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: "3000"
+      HUSKY: "0"
+      # Browser-facing URLs → must resolve from your Mac, hence localhost:<published port>
+      NEXT_PUBLIC_BACKEND_HOST: ${NEXT_PUBLIC_BACKEND_HOST:-http://localhost:4000}
+      NEXT_PUBLIC_GRAPHQL_API_URL: ${NEXT_PUBLIC_GRAPHQL_API_URL:-http://localhost:4000/graphql}
+      # reliable HMR over Docker Desktop's filesystem
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+      NPM_CONFIG_MINIMUM_RELEASE_AGE: *npm-age
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ${REPOS_DIR:-./repos}/frontend:/workspace/frontend
+      - ./docker:/workspace/scripts:ro
+      - frontend_node_modules:/workspace/frontend/node_modules
+      - frontend_next:/workspace/frontend/.next
+    command: ["bash", "/workspace/scripts/entrypoint-frontend.sh"]
+
+  # Optional: cross-compiles the Rust guest agent (Windows .exe + Linux ELF) and
+  # drops the artifacts into the shared infinibay_base volume where the backend
+  # serves them to guests. NOT started by default (it is slow and the agent only
+  # runs inside real VMs). Run with:  ./dev.sh build-infiniservice
+  infiniservice-builder:
+    profiles: ["builders"]
+    build:
+      context: .
+      dockerfile: docker/infiniservice.Dockerfile
+    image: infinibay/dev-infiniservice-builder
+    working_dir: /workspace/infiniservice
+    environment:
+      INFINIBAY_BASE_DIR: /opt/infinibay
+    volumes:
+      - ${REPOS_DIR:-./repos}/infiniservice:/workspace/infiniservice
+      - ./docker:/workspace/scripts:ro
+      - infiniservice_target:/workspace/infiniservice/target
+      - infiniservice_cargo:/usr/local/cargo/registry
+      - infinibay_base:/opt/infinibay
+    command: ["bash", "/workspace/scripts/entrypoint-infiniservice.sh"]
+
+volumes:
+  pgdata:
+  backend_node_modules:
+  infinization_node_modules:
+  infinization_dist:
+  frontend_node_modules:
+  frontend_next:
+  infiniservice_target:
+  infiniservice_cargo:
+  infinibay_base:

@@ -1,0 +1,38 @@
+# Infinibay — KVM / full-hypervisor override (LINUX HOSTS ONLY)
+#
+# The base docker-compose.yml runs the control plane only. To actually launch
+# VMs, infinization needs hardware virtualization and host-level networking,
+# which exist only on a Linux host with /dev/kvm. This override grants them.
+#
+#   docker compose --env-file .env.docker \
+#     -f docker-compose.yml -f docker-compose.kvm.yml up    (or: ./dev.sh up --kvm)
+#
+# Do NOT use this on macOS / Docker Desktop — /dev/kvm does not exist there and
+# the backend container will fail to start the devices below.
+#
+# Even on Linux you typically need the kvm group GID to match the host. If VM
+# creation fails with a /dev/kvm permission error, either run the host's
+# `setfacl -m u:<uid>:rw /dev/kvm` or fall back to `privileged: true` (already
+# set here) which sidesteps device cgroup + group checks.
+
+services:
+  backend:
+    # Full host access: KVM, TAP/TUN, nftables, bridges, NAT.
+    privileged: true
+    devices:
+      - "/dev/kvm:/dev/kvm"
+      - "/dev/net/tun:/dev/net/tun"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+    # Department networking creates bridges + dnsmasq + nft rules on the host
+    # network namespace. If you need guests to reach the LAN, switch to host
+    # networking (Linux only) by uncommenting the next line AND removing the
+    # `ports:` mapping for backend in the base file (host net publishes directly).
+    # network_mode: host
+    environment:
+      # On a real KVM host these point at the host's LAN address so SPICE links
+      # and guest asset fetches resolve. Override in .env.docker.
+      APP_HOST: ${APP_HOST:-127.0.0.1}
+      GRAPHIC_HOST: ${GRAPHIC_HOST:-127.0.0.1}
