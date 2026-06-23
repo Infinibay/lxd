@@ -49,7 +49,7 @@ ensure_env() {
 # Clone a repo if absent (frontend pulls its harbor submodule too). Existing
 # checkouts are left exactly as-is so local edits survive — use `pull` to update.
 clone_one() {
-  local name="$1" dir="$REPOS_DIR/$name"
+  local name="$1"; local dir="$REPOS_DIR/$name"
   if [ -d "$dir/.git" ]; then
     return 0
   fi
@@ -82,7 +82,7 @@ clone_all() { local r; for r in "${REPOS[@]}"; do clone_one "$r"; done; }
 
 # Fast-forward to latest origin/<ref>. Refuses to discard uncommitted edits.
 pull_one() {
-  local name="$1" dir="$REPOS_DIR/$name"
+  local name="$1"; local dir="$REPOS_DIR/$name"
   [ -d "$dir/.git" ] || { clone_one "$name"; return; }
   if [ -n "$(git -C "$dir" status --porcelain)" ]; then
     warn "$name has local changes — skipping pull (commit/stash to update)."
