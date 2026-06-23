@@ -72,7 +72,11 @@ services:
       TOKENKEY: ${TOKENKEY:-dev-insecure-change-me}
       ALLOW_INSECURE_JWT_FALLBACK: "1"
       BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-10}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+      # Explicit origins (NOT '*'): the backend sets credentials:true, and a browser
+      # refuses '*' with credentials. It also splits ALLOWED_ORIGINS on ',' and does
+      # an exact match, so '*' never matches a real origin → no Allow-Origin header.
+      # Both localhost and 127.0.0.1 are listed so either browse host works.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       FRONTEND_URL: ${FRONTEND_URL:-*}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # host advertised to VMs (SPICE/graphics + asset fetch). localhost in dev.
