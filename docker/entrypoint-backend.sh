@@ -19,6 +19,19 @@ INFZ=/workspace/infinization
 BE=/workspace/backend
 NPM_AGE_FLAG="--minimum-release-age=0" # sanctioned dev override of .npmrc guardrail
 
+# ── 0. kernel-module tooling (lsmod) ─────────────────────────────────────────
+# The VM-networking code probes modules with `lsmod` (and would `modprobe` on a
+# miss). Those binaries live in the kmod package, which the base image omits. The
+# MODULES THEMSELVES are loaded on the host by ./dev.sh — here we only need lsmod
+# so the backend SEES them through the shared /proc/modules and skips modprobe
+# (which can't load host modules from inside a container anyway). Guarded → the
+# install runs at most once per container. No-op on hosts without VMs.
+if ! command -v lsmod >/dev/null 2>&1; then
+  log "installing kmod (lsmod) for host kernel-module detection…"
+  (apt-get update && apt-get install -y --no-install-recommends kmod) \
+    >/tmp/kmod-install.log 2>&1 || warn "kmod install failed (module checks will warn; non-fatal)"
+fi
+
 # ── 1. infinization (sibling file: dependency) ───────────────────────────────
 # backend's package.json declares "@infinibay/infinization": "file:../infinization"
 # and imports its COMPILED dist/index.js, so it must exist + be built first.

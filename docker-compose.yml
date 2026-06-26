@@ -77,7 +77,10 @@ services:
       # an exact match, so '*' never matches a real origin → no Allow-Origin header.
       # Both localhost and 127.0.0.1 are listed so either browse host works.
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
-      FRONTEND_URL: ${FRONTEND_URL:-*}
+      # socket.io CORS. SocketService prefers ALLOWED_ORIGINS (multi-origin) and
+      # falls back to FRONTEND_URL. dev.sh keeps both aligned; never '*' here
+      # because socket.io sets credentials:true and a browser rejects '*'+creds.
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000,http://127.0.0.1:3000}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # host advertised to VMs (SPICE/graphics + asset fetch). localhost in dev.
       APP_HOST: ${APP_HOST:-localhost}
@@ -86,8 +89,8 @@ services:
       # filesystem roots (shared infinibay_base volume)
       INFINIBAY_BASE_DIR: /opt/infinibay
       # optional admin bootstrap consumed by the seed if present
-      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@infinibay.local}
-      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-admin12345}
+      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@example.com}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-password}
       # dev ergonomics
       RUN_SEED: ${RUN_SEED:-true}
       CHOKIDAR_USEPOLLING: "true"
@@ -125,7 +128,9 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: "3000"
       HUSKY: "0"
-      # Browser-facing URLs → must resolve from your Mac, hence localhost:<published port>
+      # Browser-facing URLs, BAKED into the bundle → must resolve from whatever
+      # device loads the UI. dev.sh fills these with the host LAN IP so remote
+      # devices work; falls back to localhost for local-only use.
       NEXT_PUBLIC_BACKEND_HOST: ${NEXT_PUBLIC_BACKEND_HOST:-http://localhost:4000}
       NEXT_PUBLIC_GRAPHQL_API_URL: ${NEXT_PUBLIC_GRAPHQL_API_URL:-http://localhost:4000/graphql}
       # reliable HMR over Docker Desktop's filesystem

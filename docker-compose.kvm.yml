@@ -26,6 +26,14 @@ services:
       - NET_ADMIN
       - NET_RAW
       - SYS_ADMIN
+    volumes:
+      # The VM-networking code runs `modprobe br_netfilter nf_conntrack_bridge`.
+      # ./dev.sh already loads those on the HOST (shared kernel), but without the
+      # host module tree the in-container modprobe errors with "Module ... not
+      # found in /lib/modules/<kver>". Mounting it read-only lets modprobe see the
+      # already-loaded modules and no-op succeed, removing the boot-time ERROR.
+      # (Merged with the base backend volumes; Linux-only override.)
+      - /lib/modules:/lib/modules:ro
     # Department networking creates bridges + dnsmasq + nft rules on the host
     # network namespace. If you need guests to reach the LAN, switch to host
     # networking (Linux only) by uncommenting the next line AND removing the
