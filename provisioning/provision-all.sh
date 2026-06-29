@@ -9,6 +9,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Source the provisioning state library
 source "${SCRIPT_DIR}/../lib/provisioning-state.sh"
 
+# Load deployment secrets from the host .env so they can be propagated into the
+# backend container. `lxc exec` does NOT inherit the host environment, so these
+# must be passed explicitly to backend.sh (below); without this, the backend
+# would fall back to its placeholder defaults.
+ENV_FILE="${SCRIPT_DIR}/../.env"
+if [ -f "$ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
+fi
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -79,7 +91,10 @@ echo -e "${YELLOW}Step 1/3: Provisioning PostgreSQL...${NC}"
 provision_container "infinibay-postgres" "postgres.sh"
 
 echo -e "${YELLOW}Step 2/3: Provisioning Backend...${NC}"
-provision_container "infinibay-backend" "backend.sh"
+# Pass app secrets explicitly — lxc exec does not inherit the host environment.
+provision_container "infinibay-backend" "backend.sh" \
+    "TOKENKEY=${TOKENKEY:-}" \
+    "INFINISERVICE_HMAC_MASTER_SECRET=${INFINISERVICE_HMAC_MASTER_SECRET:-}"
 
 # Copy wallpapers to backend container after provisioning
 echo -e "${BLUE}Copying wallpapers to backend container...${NC}"

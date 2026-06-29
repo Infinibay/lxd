@@ -395,18 +395,46 @@ check_env_file() {
             log_warning "Could not auto-detect host IP. Please configure manually in $ENV_FILE"
         fi
 
-        # Generate random passwords
+        # Generate random passwords and application secrets.
+        # tr strips =+/ so every value is plain alphanumeric — safe for sed and
+        # for use as an HMAC key. The master secret is the longest (>= 32 chars).
         DB_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
         ADMIN_PASSWORD=$(openssl rand -base64 16 | tr -d "=+/" | cut -c1-16)
+        TOKENKEY=$(openssl rand -base64 48 | tr -d "=+/" | cut -c1-40)
+        INFINISERVICE_HMAC_MASTER_SECRET=$(openssl rand -base64 48 | tr -d "=+/" | cut -c1-44)
 
         sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" "$ENV_FILE"
         sed -i "s/ADMIN_PASSWORD=.*/ADMIN_PASSWORD=$ADMIN_PASSWORD/" "$ENV_FILE"
+        sed -i "s/TOKENKEY=.*/TOKENKEY=$TOKENKEY/" "$ENV_FILE"
+        sed -i "s/INFINISERVICE_HMAC_MASTER_SECRET=.*/INFINISERVICE_HMAC_MASTER_SECRET=$INFINISERVICE_HMAC_MASTER_SECRET/" "$ENV_FILE"
 
-        log_success "Generated secure passwords in .env file"
+        log_success "Generated secure passwords and application secrets in .env file"
         log_warning "IMPORTANT: Review and customize $ENV_FILE before deployment!"
 
         return 1
     fi
+
+    # Existing .env: top up application secrets that are missing or still hold a
+    # placeholder. A deploy that predates the agent HMAC auth must not provision
+    # with a predictable secret (which would make per-VM HMAC keys guessable).
+    ensure_secret() {
+        local key="$1" len="$2" current
+        current=$(grep -E "^${key}=" "$ENV_FILE" | head -1 | cut -d= -f2-)
+        case "$current" in
+            ""|*changeme*)
+                local value
+                value=$(openssl rand -base64 48 | tr -d "=+/" | cut -c1-"$len")
+                if grep -qE "^${key}=" "$ENV_FILE"; then
+                    sed -i "s/^${key}=.*/${key}=${value}/" "$ENV_FILE"
+                else
+                    printf '%s=%s\n' "$key" "$value" >> "$ENV_FILE"
+                fi
+                log_success "Generated ${key} in existing .env"
+                ;;
+        esac
+    }
+    ensure_secret TOKENKEY 40
+    ensure_secret INFINISERVICE_HMAC_MASTER_SECRET 44
 
     log_success "Environment file found: $ENV_FILE"
     return 0

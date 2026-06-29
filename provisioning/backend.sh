@@ -149,8 +149,24 @@ DB_NAME=${DB_NAME:-infinibay}
 DB_USER=${DB_USER:-infinibay}
 DB_PASSWORD=${DB_PASSWORD:-changeme}
 HOST_IP=${HOST_IP:-192.168.0.1}
-TOKENKEY=${TOKENKEY:-changeme}
-INFINISERVICE_HMAC_MASTER_SECRET=${INFINISERVICE_HMAC_MASTER_SECRET:-changeme}
+TOKENKEY=${TOKENKEY:-}
+INFINISERVICE_HMAC_MASTER_SECRET=${INFINISERVICE_HMAC_MASTER_SECRET:-}
+
+# Secrets must be strong and unique. Refuse to provision with an empty or
+# placeholder value: a predictable TOKENKEY breaks API auth, and a predictable
+# INFINISERVICE_HMAC_MASTER_SECRET makes the agent's command authentication
+# worthless (every per-VM key HMAC(master, vmId) becomes guessable). Run
+# ./setup.sh on the host to generate them, then re-provision.
+for _secret_var in TOKENKEY INFINISERVICE_HMAC_MASTER_SECRET; do
+    _secret_val="${!_secret_var}"
+    case "$_secret_val" in
+        ""|*changeme*)
+            echo "FATAL: $_secret_var is empty or a placeholder ('${_secret_val}')." >&2
+            echo "       Generate a strong value (setup.sh does this automatically) and re-provision." >&2
+            exit 1
+            ;;
+    esac
+done
 
 # Create backend .env with LXD container networking
 cat > /opt/infinibay/backend/.env << EOF
