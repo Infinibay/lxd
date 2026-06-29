@@ -150,6 +150,7 @@ DB_USER=${DB_USER:-infinibay}
 DB_PASSWORD=${DB_PASSWORD:-changeme}
 HOST_IP=${HOST_IP:-192.168.0.1}
 TOKENKEY=${TOKENKEY:-changeme}
+INFINISERVICE_HMAC_MASTER_SECRET=${INFINISERVICE_HMAC_MASTER_SECRET:-changeme}
 
 # Create backend .env with LXD container networking
 cat > /opt/infinibay/backend/.env << EOF
@@ -160,6 +161,9 @@ DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@infinibay-postgres:5432/${DB
 NODE_ENV=production
 PORT=4000
 TOKENKEY=${TOKENKEY}
+# Master secret for signing commands to the in-guest infiniservice agent
+# (per-VM key = HMAC(this, vmId)); unset => agent rejects all commands.
+INFINISERVICE_HMAC_MASTER_SECRET=${INFINISERVICE_HMAC_MASTER_SECRET}
 BCRYPT_ROUNDS=10
 FRONTEND_URL=*
 

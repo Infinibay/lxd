@@ -70,6 +70,9 @@ services:
       PGDATABASE: ${POSTGRES_DB:-infinibay}
       # auth / app
       TOKENKEY: ${TOKENKEY:-dev-insecure-change-me}
+      # Master secret for signing commands to the in-guest infiniservice agent.
+      # Per-VM key = HMAC(this, vmId). Unset => agent rejects all commands.
+      INFINISERVICE_HMAC_MASTER_SECRET: ${INFINISERVICE_HMAC_MASTER_SECRET:-dev-insecure-change-me}
       ALLOW_INSECURE_JWT_FALLBACK: "1"
       BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-10}
       # Explicit origins (NOT '*'): the backend sets credentials:true, and a browser
