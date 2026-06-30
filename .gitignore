@@ -12,3 +12,10 @@ TESTING.md
 *.log
 *.backup
 profiles/generated/
+
+
+# ken — local index, daemon socket, logs
+.ken/
+
+# local multi-node KVM test harness (copies dev secrets — never commit)
+.env.livetest

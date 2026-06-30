@@ -43,7 +43,7 @@ services:
   # Inject the cluster bootstrap token into the MASTER so it accepts heartbeats.
   backend:
     environment:
-      INFINIBAY_CLUSTER_TOKEN: ${INFINIBAY_CLUSTER_TOKEN:-dev-insecure-cluster-token}
+      INFINIBAY_CLUSTER_TOKEN: ${INFINIBAY_CLUSTER_TOKEN:?set INFINIBAY_CLUSTER_TOKEN to a strong secret, e.g. export INFINIBAY_CLUSTER_TOKEN=$(openssl rand -hex 32)}
 
   node-1:
     <<: *node-agent
@@ -52,7 +52,7 @@ services:
       MASTER_URL: http://backend:4000
       INFINIBAY_NODE_NAME: node-1
       INFINIBAY_NODE_ROLE: compute
-      INFINIBAY_CLUSTER_TOKEN: ${INFINIBAY_CLUSTER_TOKEN:-dev-insecure-cluster-token}
+      INFINIBAY_CLUSTER_TOKEN: ${INFINIBAY_CLUSTER_TOKEN:?set INFINIBAY_CLUSTER_TOKEN to a strong secret, e.g. export INFINIBAY_CLUSTER_TOKEN=$(openssl rand -hex 32)}
       NODE_ADDRESS: node-1
       HEARTBEAT_INTERVAL_MS: "10000"
       AGENT_VERSION: 0.0.0-skeleton
@@ -65,7 +65,7 @@ services:
       MASTER_URL: http://backend:4000
       INFINIBAY_NODE_NAME: node-2
       INFINIBAY_NODE_ROLE: compute
-      INFINIBAY_CLUSTER_TOKEN: ${INFINIBAY_CLUSTER_TOKEN:-dev-insecure-cluster-token}
+      INFINIBAY_CLUSTER_TOKEN: ${INFINIBAY_CLUSTER_TOKEN:?set INFINIBAY_CLUSTER_TOKEN to a strong secret, e.g. export INFINIBAY_CLUSTER_TOKEN=$(openssl rand -hex 32)}
       NODE_ADDRESS: node-2
       HEARTBEAT_INTERVAL_MS: "10000"
       AGENT_VERSION: 0.0.0-skeleton

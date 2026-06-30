@@ -651,6 +651,7 @@ case "${1:-}" in
         node_name="${4:-$(hostname)}"
         container="${INFINIBAY_AGENT_CONTAINER:-infinibay-backend}"
 
+        discovered_via_mdns=0
         if [[ "$master_url" == "auto" || -z "$master_url" ]]; then
             echo -e "${BLUE}Discovering an Infinibay master via mDNS...${NC}"
             master_url="$(discover_master)"
@@ -659,6 +660,7 @@ case "${1:-}" in
                 echo -e "Usage: $0 join <master-url> <token> [node-name]"
                 exit 1
             fi
+            discovered_via_mdns=1
             echo -e "${GREEN}Found master:${NC} $master_url"
         fi
         if [[ -z "$token" ]]; then
@@ -666,6 +668,39 @@ case "${1:-}" in
             echo -e "Usage: $0 join <master-url> <token> [node-name]"
             echo -e "Detailed help: $0 help join"
             exit 1
+        fi
+
+        # SECURITY: validate every value that is later interpolated into a
+        # privileged shell command (sg lxd -c "... npm run agent:join"). Without
+        # this, a token/node-name/URL containing shell metacharacters (e.g.
+        # "x'; rm -rf / ; echo '") would break out of the quoting and run as the
+        # lxd group on the host (root-equivalent via LXD). Reject anything outside
+        # a conservative safe set.
+        if [[ ! "$master_url" =~ ^https?://[A-Za-z0-9._~:/?#@!$\&\'\(\)*+,\;=%-]+$ ]]; then
+            echo -e "${RED}Error: master URL contains unexpected characters: ${master_url}${NC}"; exit 1
+        fi
+        if [[ ! "$token" =~ ^[A-Za-z0-9._+=/:-]+$ ]]; then
+            echo -e "${RED}Error: the cluster token contains characters outside the allowed set [A-Za-z0-9._+=/:-]${NC}"; exit 1
+        fi
+        if [[ ! "$node_name" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo -e "${RED}Error: node name must match [A-Za-z0-9._-]: ${node_name}${NC}"; exit 1
+        fi
+        if [[ ! "$container" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo -e "${RED}Error: container name must match [A-Za-z0-9._-]: ${container}${NC}"; exit 1
+        fi
+
+        # SECURITY: mDNS discovery is UNAUTHENTICATED — any host on the LAN can
+        # advertise _infinibay-master._tcp. Do not ship the bootstrap token to an
+        # auto-discovered peer without the operator confirming it is the real
+        # master (the SAS pairing code is only checked AFTER the token is sent).
+        if [[ "$discovered_via_mdns" == "1" ]]; then
+            echo -e "${YELLOW}This master was found via mDNS and is NOT authenticated. Anyone on the"
+            echo -e "network can advertise it. The bootstrap token will be sent to it FIRST,"
+            echo -e "before the pairing-code check. Only continue if you trust ${master_url}.${NC}"
+            read -r -p "Send the bootstrap token to ${master_url}? [y/N] " _confirm
+            if [[ "${_confirm}" != "y" && "${_confirm}" != "Y" ]]; then
+                echo -e "${RED}Aborted. Pass the master URL explicitly to skip mDNS discovery.${NC}"; exit 1
+            fi
         fi
 
         master_host="${master_url#*://}"; master_host="${master_host%%/*}"; master_host="${master_host%%:*}"
