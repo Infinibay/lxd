@@ -550,6 +550,25 @@ smart_default() {
     echo -e "  Shell:    ${BLUE}./run.sh exec <container-name>${NC}"
 }
 
+# Best-effort mDNS discovery of an Infinibay master on the LAN. Returns a master
+# URL on stdout (empty if none found). Used by 'join' when the master is "auto".
+discover_master() {
+    local svc="_infinibay-master._tcp"
+    local host="" port=""
+    if command -v avahi-browse >/dev/null 2>&1; then
+        # -t terminate, -r resolve, -p parsable. Take the first resolved record.
+        local line
+        line="$(avahi-browse -tprk "$svc" 2>/dev/null | awk -F';' '$1=="=" {print $8";"$9; exit}')"
+        host="${line%%;*}"; port="${line##*;}"
+    elif command -v dns-sd >/dev/null 2>&1; then
+        # macOS / mDNSResponder; dns-sd has no clean one-shot, so skip resolving.
+        host=""
+    fi
+    if [[ -n "$host" && -n "$port" ]]; then
+        echo "http://${host}:${port}"
+    fi
+}
+
 # Normalize 'help <subcommand>' to 'help-<subcommand>' pattern
 # This allows both './run.sh help update' and './run.sh help-update' to work
 if [[ "${1:-}" == "help" && -n "${2:-}" ]]; then
@@ -559,6 +578,9 @@ if [[ "${1:-}" == "help" && -n "${2:-}" ]]; then
             ;;
         upgrade|ug)
             set -- "help-upgrade"
+            ;;
+        join|jn)
+            set -- "help-join"
             ;;
     esac
 fi
@@ -618,6 +640,56 @@ case "${1:-}" in
             echo -e "${YELLOW}No existing environment found. Will create fresh.${NC}\n"
         fi
         smart_default
+        ;;
+
+    join|jn)
+        # Onboard THIS host as a compute node of an existing master cluster.
+        # Wraps `npm run agent:join` (SAS-verified mTLS enrollment) in the agent
+        # container, then points the operator at the next (start-agent) step.
+        master_url="${2:-}"
+        token="${3:-}"
+        node_name="${4:-$(hostname)}"
+        container="${INFINIBAY_AGENT_CONTAINER:-infinibay-backend}"
+
+        if [[ "$master_url" == "auto" || -z "$master_url" ]]; then
+            echo -e "${BLUE}Discovering an Infinibay master via mDNS...${NC}"
+            master_url="$(discover_master)"
+            if [[ -z "$master_url" ]]; then
+                echo -e "${RED}No master found via mDNS.${NC}"
+                echo -e "Usage: $0 join <master-url> <token> [node-name]"
+                exit 1
+            fi
+            echo -e "${GREEN}Found master:${NC} $master_url"
+        fi
+        if [[ -z "$token" ]]; then
+            echo -e "${RED}Error: a cluster bootstrap token is required${NC}"
+            echo -e "Usage: $0 join <master-url> <token> [node-name]"
+            echo -e "Detailed help: $0 help join"
+            exit 1
+        fi
+
+        master_host="${master_url#*://}"; master_host="${master_host%%/*}"; master_host="${master_host%%:*}"
+
+        echo -e "${BLUE}=== Joining cluster as node '${node_name}' ===${NC}"
+        echo -e "  Master:    ${master_url}"
+        echo -e "  Node name: ${node_name}"
+        echo -e "  Container: ${container}"
+        echo ""
+        echo -e "${YELLOW}A 6-digit PAIRING CODE will be printed below. Compare it with the code"
+        echo -e "shown for this node in the master's Infrastructure UI, then APPROVE it there."
+        echo -e "If the codes differ, the connection may be tampered with — do NOT approve.${NC}"
+        echo ""
+
+        if ! sg lxd -c "lxc exec '$container' -- su - infinibay -c 'cd /opt/infinibay/backend && MASTER_URL=\"$master_url\" INFINIBAY_CLUSTER_TOKEN=\"$token\" INFINIBAY_NODE_NAME=\"$node_name\" npm run agent:join'"; then
+            echo -e "\n${RED}Join failed. Check the master URL/token and that container '${container}' is running.${NC}"
+            exit 1
+        fi
+
+        echo -e "\n${GREEN}Node '${node_name}' enrolled — its client certificate was issued.${NC}"
+        echo -e "${BLUE}Next — start the node agent in mTLS mode${NC} (set in its environment, then run ${GREEN}npm run agent:heartbeat${NC}):"
+        echo -e "  ${CYAN}INFINIBAY_CLUSTER_MTLS=1${NC}"
+        echo -e "  ${CYAN}MASTER_CLUSTER_URL=https://${master_host}:4433${NC}   ${YELLOW}# the master's mTLS port${NC}"
+        echo -e "  ${CYAN}INFINIBAY_MASTER_CN=<the master's node name>${NC}"
         ;;
 
     status|s|st)
@@ -2211,6 +2283,50 @@ case "${1:-}" in
         echo ""
         ;;
 
+    help-join|help_join)
+        echo -e "${BLUE}╔══════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${BLUE}║         Infinibay Join Command - Detailed Help              ║${NC}"
+        echo -e "${BLUE}╚══════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "${GREEN}Purpose:${NC}"
+        echo -e "  Onboard THIS host as a compute node of an existing Infinibay master"
+        echo -e "  cluster, using the SAS-verified mTLS enrollment flow (\"double"
+        echo -e "  verification\")."
+        echo ""
+        echo -e "${BLUE}Usage:${NC}"
+        echo -e "  $0 join <master-url> <token> [node-name]"
+        echo -e "  $0 join auto <token> [node-name]      # discover the master via mDNS"
+        echo -e "  $0 jn <master-url> <token>             # shortcut"
+        echo ""
+        echo -e "${BLUE}Arguments:${NC}"
+        echo -e "  ${GREEN}master-url${NC}   The master's HTTP endpoint, e.g. http://master:4000"
+        echo -e "               (or 'auto' to discover it on the LAN via mDNS)"
+        echo -e "  ${GREEN}token${NC}        The cluster bootstrap token (INFINIBAY_CLUSTER_TOKEN on the master)"
+        echo -e "  ${GREEN}node-name${NC}    This node's name (default: hostname)"
+        echo ""
+        echo -e "${BLUE}What It Does:${NC}"
+        echo -e "  1. Runs ${CYAN}npm run agent:join${NC} in the agent container"
+        echo -e "  2. Prints a 6-digit PAIRING CODE for this node"
+        echo -e "  3. You compare it with the code shown for the node in the master's"
+        echo -e "     Infrastructure UI and APPROVE it there (a mismatch = possible MITM)"
+        echo -e "  4. The master signs this node's client certificate; it is written to"
+        echo -e "     ${CYAN}INFINIBAY_CERT_DIR${NC} (default /opt/infinibay/certs)"
+        echo ""
+        echo -e "${YELLOW}After joining — start the node agent in mTLS mode${NC} (set, then ${GREEN}npm run agent:heartbeat${NC}):"
+        echo -e "  ${CYAN}INFINIBAY_CLUSTER_MTLS=1${NC}"
+        echo -e "  ${CYAN}MASTER_CLUSTER_URL=https://<master-host>:4433${NC}"
+        echo -e "  ${CYAN}INFINIBAY_MASTER_CN=<the master's node name>${NC}"
+        echo ""
+        echo -e "${BLUE}Environment overrides:${NC}"
+        echo -e "  ${GREEN}INFINIBAY_AGENT_CONTAINER${NC}   Agent container name (default: infinibay-backend)"
+        echo ""
+        echo -e "${BLUE}Examples:${NC}"
+        echo -e "  ${GREEN}$0 join http://master:4000 s3cr3t-token${NC}"
+        echo -e "  ${GREEN}$0 join http://10.0.0.5:4000 s3cr3t-token worker-1${NC}"
+        echo -e "  ${GREEN}$0 join auto s3cr3t-token${NC}"
+        echo ""
+        ;;
+
     help|--help|-h)
         # Note: 'help <subcommand>' is normalized to 'help-<subcommand>' at script top
         echo -e "${BLUE}╔══════════════════════════════════════════════════════════════╗${NC}"
@@ -2257,6 +2373,9 @@ case "${1:-}" in
         echo -e "             --disable-schedule   Disable automatic backups"
         echo -e "    ${YELLOW}Retention:${NC} manual (never), update/upgrade (30d), scheduled (7d or last 10)"
         echo -e "  ${GREEN}setup-profiles${NC}              sp          Generate and update LXD profiles only"
+        echo -e "  ${GREEN}join${NC} <master> <token>      jn          Onboard this host as a cluster compute node"
+        echo -e "    ${YELLOW}Note:${NC} SAS-verified mTLS enrollment; approve the pairing code in the master UI"
+        echo -e "    ${CYAN}Detailed help:${NC} $0 help join"
         echo -e "  ${GREEN}exec${NC} <name> [cmd]          e, ex       Execute command in container"
         echo -e "  ${GREEN}logs${NC} <name>                l, lo       Follow logs from container"
         echo -e "  ${GREEN}help${NC}                        -           Show this help"
