@@ -136,6 +136,12 @@ services:
       # devices work; falls back to localhost for local-only use.
       NEXT_PUBLIC_BACKEND_HOST: ${NEXT_PUBLIC_BACKEND_HOST:-http://localhost:4000}
       NEXT_PUBLIC_GRAPHQL_API_URL: ${NEXT_PUBLIC_GRAPHQL_API_URL:-http://localhost:4000/graphql}
+      # Next.js 16 blocks dev-server resources (HMR WebSocket) from any origin not
+      # in allowedDevOrigins — so loading the UI from the host LAN IP fails its HMR
+      # ws ("ws://<lan-ip>:3000/_next/webpack-hmr failed") even though the app works.
+      # dev.sh exports the auto-detected HOST_IP; pass it through so the LAN origin
+      # is allowed (next.config.js reads NEXT_ALLOWED_DEV_ORIGINS, comma-separated).
+      NEXT_ALLOWED_DEV_ORIGINS: ${HOST_IP:-}
       # reliable HMR over Docker Desktop's filesystem
       WATCHPACK_POLLING: "true"
       CHOKIDAR_USEPOLLING: "true"
