@@ -1,0 +1,72 @@
+# Infinibay — multi-node CLUSTER emulation overlay (Phase 1 walking skeleton).
+#
+# Adds N compute-node AGENTS that heartbeat the master, so you can watch the
+# master report multiple nodes online — all on ONE Docker/podman host. This is
+# the dev/CI substrate for the multi-node work: real container-to-container
+# networking, real registration + heartbeat, no extra hardware.
+#
+# Bring it up alongside the dev stack:
+#   docker compose -f docker-compose.yml -f docker-compose.cluster.yml up
+#   (override REPOS_DIR / INFINIBAY_CLUSTER_TOKEN via --env-file .env.docker)
+#
+# Then query the master and you should see node-1 + node-2 online next to the
+# master's own local node:
+#   curl -s localhost:4000/graphql -H 'content-type: application/json' \
+#     -d '{"query":"{ nodes { name role health } }"}'    # (auth as admin)
+#
+# Each node-agent reuses the backend image and runs `npm run agent:heartbeat`
+# against backend:4000. The shared bootstrap token gates the pre-mTLS channel
+# (Phase 2 replaces it with mTLS onboarding + the SAS pairing flow). KVM/QEMU is
+# NOT needed for the heartbeat skeleton; later increments grow the agent to host
+# infinization and the node containers gain /dev/kvm like docker-compose.kvm.yml.
+
+name: infinibay-dev
+
+x-npm-age: &npm-age "0"
+
+# Shared definition for every compute-node agent. New nodes = copy a block and
+# bump INFINIBAY_NODE_NAME / NODE_ADDRESS.
+x-node-agent: &node-agent
+  image: infinibay/dev-backend # built by the `backend` service
+  restart: unless-stopped
+  init: true
+  working_dir: /workspace/backend
+  depends_on:
+    backend:
+      condition: service_healthy # ensures node_modules is installed + master is up
+  volumes:
+    - ${REPOS_DIR:-./repos}/backend:/workspace/backend
+    - backend_node_modules:/workspace/backend/node_modules
+  command: ["npm", "run", "agent:heartbeat"]
+
+services:
+  # Inject the cluster bootstrap token into the MASTER so it accepts heartbeats.
+  backend:
+    environment:
+      INFINIBAY_CLUSTER_TOKEN: ${INFINIBAY_CLUSTER_TOKEN:-dev-insecure-cluster-token}
+
+  node-1:
+    <<: *node-agent
+    environment:
+      NODE_ENV: development
+      MASTER_URL: http://backend:4000
+      INFINIBAY_NODE_NAME: node-1
+      INFINIBAY_NODE_ROLE: compute
+      INFINIBAY_CLUSTER_TOKEN: ${INFINIBAY_CLUSTER_TOKEN:-dev-insecure-cluster-token}
+      NODE_ADDRESS: node-1
+      HEARTBEAT_INTERVAL_MS: "10000"
+      AGENT_VERSION: 0.0.0-skeleton
+      NPM_CONFIG_MINIMUM_RELEASE_AGE: *npm-age
+
+  node-2:
+    <<: *node-agent
+    environment:
+      NODE_ENV: development
+      MASTER_URL: http://backend:4000
+      INFINIBAY_NODE_NAME: node-2
+      INFINIBAY_NODE_ROLE: compute
+      INFINIBAY_CLUSTER_TOKEN: ${INFINIBAY_CLUSTER_TOKEN:-dev-insecure-cluster-token}
+      NODE_ADDRESS: node-2
+      HEARTBEAT_INTERVAL_MS: "10000"
+      AGENT_VERSION: 0.0.0-skeleton
+      NPM_CONFIG_MINIMUM_RELEASE_AGE: *npm-age
