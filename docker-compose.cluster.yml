@@ -37,6 +37,18 @@ x-node-agent: &node-agent
   volumes:
     - ${REPOS_DIR:-./repos}/backend:/workspace/backend
     - backend_node_modules:/workspace/backend/node_modules
+    # The heartbeat agent statically imports @infinibay/infinization, declared in
+    # backend as "file:../infinization". npm turns node_modules/@infinibay/
+    # infinization into a SYMLINK to /workspace/infinization, and the package
+    # resolves to dist/index.js + dist/index.d.ts — so the repo, its built dist,
+    # and its node_modules must be mounted here exactly as the `backend` service
+    # mounts them, or ts-node can't resolve the module (TS2307, crash-looping the
+    # node agents). These are the SAME named volumes the backend populates (it
+    # builds infinization into infinization_dist via tsc), and depends_on:
+    # backend service_healthy guarantees that build finished before we start.
+    - ${REPOS_DIR:-./repos}/infinization:/workspace/infinization
+    - infinization_node_modules:/workspace/infinization/node_modules
+    - infinization_dist:/workspace/infinization/dist
   command: ["npm", "run", "agent:heartbeat"]
 
 services:
