@@ -10,15 +10,28 @@
 # Do NOT use this on macOS / Docker Desktop — /dev/kvm does not exist there and
 # the backend container will fail to start the devices below.
 #
-# Even on Linux you typically need the kvm group GID to match the host. If VM
-# creation fails with a /dev/kvm permission error, either run the host's
-# `setfacl -m u:<uid>:rw /dev/kvm` or fall back to `privileged: true` (already
-# set here) which sidesteps device cgroup + group checks.
+# /dev/kvm ACCESS UNDER ROOTLESS PODMAN: the host device is `crw-rw---- root:kvm`
+# (mode 660, no world access). In a rootless user namespace the host `kvm` GID is
+# unmapped, so /dev/kvm shows as `nobody:nogroup` inside and the container's root
+# (mapped to your host UID) is neither owner nor in-group → QEMU dies with
+# "Could not access KVM kernel module: Permission denied". `privileged: true` does
+# NOT fix this: its CAP_DAC_OVERRIDE only overrides perms on files owned by UIDs
+# mapped INTO the namespace, and host root/kvm are not. The fix is `keep-groups`
+# (podman's --group-add keep-groups): it keeps your REAL host supplementary groups
+# inside the container, so the process carries GID 993 (kvm) and the kernel's
+# group-rw check on /dev/kvm passes. REQUIRES your host user to be in the `kvm`
+# group (`sudo usermod -aG kvm $USER` + re-login). Harmless under rootful podman;
+# NOT understood by real Docker Compose (podman-only) — a Docker daemon runs the
+# container as root and reaches /dev/kvm without it, so drop this line there.
 
 services:
   backend:
     # Full host access: KVM, TAP/TUN, nftables, bridges, NAT.
     privileged: true
+    # Retain the host user's supplementary groups (esp. kvm=993) so QEMU can open
+    # the group-rw /dev/kvm under rootless podman. See the header note above.
+    group_add:
+      - keep-groups
     devices:
       - "/dev/kvm:/dev/kvm"
       - "/dev/net/tun:/dev/net/tun"
