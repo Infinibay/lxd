@@ -50,6 +50,7 @@ cd "$(dirname "$0")"
 ENV_FILE=".env.docker"
 ENV_EXAMPLE=".env.docker.example"
 COMPOSE_FILES=(-f docker-compose.yml)
+COMPOSE_CMD=() # the resolved Compose v2 provider (podman-compose / docker compose)
 ENGINE_SUDO="" # set to "sudo" when rootless podman needs rootful access for VMs
 KVM_ACTIVE=0   # set to 1 by detect_runtime when the hypervisor override is enabled
 
@@ -283,9 +284,32 @@ ensure_master_env() {
   ensure_env_key INFINIBAY_CLUSTER_TOKEN dev-insecure-cluster-token "multi-node: cluster bootstrap secret (DEV ONLY — use openssl rand -hex 32 for real multi-host)"
 }
 
+# Pick a Compose Spec v2 provider. These files use v2-only features (top-level
+# `name:`, x-* anchors, `depends_on: { condition }`, YAML `<<: *merge`), so the
+# legacy python docker-compose v1 rejects them with
+#   ERROR: '<key>' does not match any of the regexes: '^x-'
+# On podman hosts the podman-docker `docker compose` shim can silently delegate
+# to a v1 docker-compose, so prefer the native podman-compose (spec-capable);
+# fall back to a real `docker compose` v2, else fail with install guidance.
+resolve_compose() {
+  if command -v podman-compose >/dev/null 2>&1; then
+    COMPOSE_CMD=(podman-compose)
+  elif docker compose version 2>/dev/null | grep -qiE 'v?2\.'; then
+    COMPOSE_CMD=(docker compose)
+  elif command -v docker-compose >/dev/null 2>&1 \
+       && docker-compose version --short 2>/dev/null | grep -qE '^v?2\.'; then
+    COMPOSE_CMD=(docker-compose)
+  else
+    die "no Compose v2 provider found. These compose files use v2-only features that legacy docker-compose v1 cannot parse ('name' does not match ... '^x-'). Install one:
+    sudo apt-get install -y podman-compose      # native podman (recommended here)
+    # — or the Docker Compose v2 plugin / standalone 'docker compose' binary"
+  fi
+  c "compose provider: ${COMPOSE_CMD[*]}"
+}
+
 ensure_env() {
   require docker
-  docker compose version >/dev/null 2>&1 || die "'docker compose' v2+ is required"
+  resolve_compose
   ensure_podman_registries
   if [ ! -f "$ENV_FILE" ]; then
     c "creating $ENV_FILE from $ENV_EXAMPLE (edit it to change ports/creds)"
@@ -372,7 +396,7 @@ dc() {
   local envfwd=()
   [ -n "${INFINIZATION_DISABLE_SANDBOX:-}" ] \
     && envfwd=(env "INFINIZATION_DISABLE_SANDBOX=$INFINIZATION_DISABLE_SANDBOX")
-  $ENGINE_SUDO ${envfwd[@]+"${envfwd[@]}"} docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" "$@"
+  $ENGINE_SUDO ${envfwd[@]+"${envfwd[@]}"} "${COMPOSE_CMD[@]}" --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" "$@"
 }
 
 cmd="${1:-up}"; shift || true
