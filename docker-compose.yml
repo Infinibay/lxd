@@ -25,7 +25,11 @@ x-npm-age: &npm-age "0" # neutralise .npmrc minimum-release-age for dev installs
 
 services:
   postgres:
-    image: postgres:16-bookworm
+    # Fully-qualified so podman resolves it without needing
+    # unqualified-search-registries in /etc/containers/registries.conf (rootful
+    # podman on Debian doesn't default bare names to docker.io, which failed with
+    # 'short-name "postgres:16-bookworm" did not resolve to an alias').
+    image: docker.io/library/postgres:16-bookworm
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-infinibay}

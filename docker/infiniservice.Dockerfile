@@ -9,7 +9,7 @@
 # but it produces correct x86_64 guest binaries with no cross-toolchain juggling.
 # The Windows .exe is then a normal mingw cross-compile on top of that.
 # (You can't run VMs on a Mac anyway, so this builder is a convenience.)
-FROM --platform=linux/amd64 rust:1-bookworm
+FROM --platform=linux/amd64 docker.io/library/rust:1-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 
