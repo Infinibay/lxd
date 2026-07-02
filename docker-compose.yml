@@ -70,6 +70,26 @@ services:
       PGDATABASE: ${POSTGRES_DB:-infinibay}
       # auth / app
       TOKENKEY: ${TOKENKEY:-dev-insecure-change-me}
+      # Cluster mTLS-server / join bootstrap secret. Must be SET for the master's
+      # cluster server (:4433) to start; already-joined nodes authenticate via
+      # their mTLS cert (not this value). Injected explicitly so it survives a
+      # bare `compose up` (not only a shell-exported dev.sh run).
+      INFINIBAY_CLUSTER_TOKEN: ${INFINIBAY_CLUSTER_TOKEN:-}
+      # Stable master identity. INFINIBAY_NODE_NAME MUST match the master's Node
+      # row name so this host re-adopts its own node (and its VMs) across
+      # recreates instead of registering a fresh random-hostname node. MTLS=1
+      # starts the cluster ops server (:4433) for remote compute nodes.
+      INFINIBAY_NODE_NAME: ${INFINIBAY_NODE_NAME:-}
+      INFINIBAY_NODE_ROLE: ${INFINIBAY_NODE_ROLE:-master}
+      INFINIBAY_CLUSTER_MTLS: ${INFINIBAY_CLUSTER_MTLS:-}
+      # QEMU seccomp sandbox opt-out. This dev stack runs QEMU inside a rootless
+      # (podman) container whose substrate seccomp policy kills a sandboxed QEMU
+      # device-init syscall with SIGSYS ("VM exited during startup … signal
+      # SIGSYS"), so VM creation fails before the guest boots. Default it OFF for
+      # dev so VMs boot out of the box; the backend keeps the sandbox ON whenever
+      # this is unset/!= "1". NOT for production — export
+      # INFINIZATION_DISABLE_SANDBOX=0 on a substrate where the sandbox works.
+      INFINIZATION_DISABLE_SANDBOX: ${INFINIZATION_DISABLE_SANDBOX:-1}
       # Master secret for signing commands to the in-guest infiniservice agent.
       # Per-VM key = HMAC(this, vmId). Unset => agent rejects all commands.
       INFINISERVICE_HMAC_MASTER_SECRET: ${INFINISERVICE_HMAC_MASTER_SECRET:-dev-insecure-change-me}
@@ -98,8 +118,16 @@ services:
       RUN_SEED: ${RUN_SEED:-true}
       CHOKIDAR_USEPOLLING: "true"
       NPM_CONFIG_MINIMUM_RELEASE_AGE: *npm-age
+      # SPICE/VNC console relay (SpiceProxyService): allocates a per-session
+      # listener in this range on the master. Must match the published range
+      # below so a browser can reach master:<port>. 20 ports = 20 concurrent
+      # consoles in dev; widen for larger fleets.
+      SPICE_PROXY_PORT_MIN: ${SPICE_PROXY_PORT_MIN:-6100}
+      SPICE_PROXY_PORT_MAX: ${SPICE_PROXY_PORT_MAX:-6119}
     ports:
       - "${BACKEND_PORT:-4000}:4000"
+      # Console relay range — keep in sync with SPICE_PROXY_PORT_MIN/MAX above.
+      - "${SPICE_PROXY_PORT_MIN:-6100}-${SPICE_PROXY_PORT_MAX:-6119}:${SPICE_PROXY_PORT_MIN:-6100}-${SPICE_PROXY_PORT_MAX:-6119}"
     volumes:
       - ${REPOS_DIR:-./repos}/backend:/workspace/backend
       - ${REPOS_DIR:-./repos}/infinization:/workspace/infinization

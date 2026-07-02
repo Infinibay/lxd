@@ -11,6 +11,20 @@
 #   ./dev.sh up --no-kvm   force control-plane-only (skip the override)
 #   KVM=on|off ./dev.sh up same, via env (also settable in .env.docker)
 #
+# QEMU SECCOMP SANDBOX defaults OFF so VMs boot on this rootless-podman substrate
+# (the sandbox otherwise kills QEMU's device-init syscall with SIGSYS). Opt in:
+#   ./dev.sh up --sandbox     run QEMU with its seccomp sandbox ON (secure; may
+#                             SIGSYS on rootless podman)
+#   ./dev.sh up --no-sandbox  explicit default — sandbox OFF (VMs boot)
+#   INFINIZATION_DISABLE_SANDBOX=0|1 ./dev.sh up   same, via env (0 = sandbox on)
+#
+# MULTI-NODE: this stack always comes up as the cluster MASTER (a dev cluster
+# token + stable node name are auto-seeded into .env.docker on first `up`). To
+# also emulate compute nodes on this one host:
+#   ./dev.sh up --cluster     add node-1/node-2 compute-agent heartbeats
+# To onboard a REAL second host as a compute node, run on that host:
+#   ./run.sh join <master-url> <token>   (mTLS + SAS pairing; token = INFINIBAY_CLUSTER_TOKEN)
+#
 # LAN ACCESS is automatic: `up` detects this host's LAN IP and advertises it so
 # the UI/API are reachable from other devices (the published ports already bind
 # 0.0.0.0). It points the browser bundle at that IP and adds it to the backend
@@ -245,6 +259,30 @@ configure_lan_access() {
   export FRONTEND_URL="$origins"
 }
 
+# Ensure a key exists in $ENV_FILE; append "KEY=default" (with an optional
+# leading comment) only when it is not already defined. Idempotent — safe to run
+# on every command. Keeping these in the env FILE (not just an exported shell
+# var) matters because the KVM path runs the engine through sudo, which resets
+# the environment — compose still reads the file via --env-file under sudo.
+ensure_env_key() {
+  local key="$1" default="$2" comment="${3:-}"
+  grep -qE "^[[:space:]]*${key}=" "$ENV_FILE" 2>/dev/null && return 0
+  { [ -n "$comment" ] && printf '\n# %s\n' "$comment"; printf '%s=%s\n' "$key" "$default"; } >> "$ENV_FILE"
+  c "added $key to $ENV_FILE (default: $default)"
+}
+
+# Multi-node MASTER bootstrap. dev.sh always brings THIS host up as the cluster
+# master (the default role is already 'master' in the backend). The cluster token
+# gates the pre-mTLS heartbeat channel that compute-node agents use to register;
+# without it the master throws "INFINIBAY_CLUSTER_TOKEN is not set" the moment it
+# dispatches to any node. A stable node name lets the master re-adopt its own Node
+# row (and its VMs) across container recreates instead of registering a random one.
+ensure_master_env() {
+  ensure_env_key INFINIBAY_NODE_NAME    master                     "multi-node: stable identity of this master node"
+  ensure_env_key INFINIBAY_NODE_ROLE    master                     "multi-node: this dev host is the cluster master"
+  ensure_env_key INFINIBAY_CLUSTER_TOKEN dev-insecure-cluster-token "multi-node: cluster bootstrap secret (DEV ONLY — use openssl rand -hex 32 for real multi-host)"
+}
+
 ensure_env() {
   require docker
   docker compose version >/dev/null 2>&1 || die "'docker compose' v2+ is required"
@@ -253,11 +291,18 @@ ensure_env() {
     c "creating $ENV_FILE from $ENV_EXAMPLE (edit it to change ports/creds)"
     cp "$ENV_EXAMPLE" "$ENV_FILE"
   fi
+  ensure_master_env
   # shellcheck disable=SC1090
   set -a; . "./$ENV_FILE"; set +a
   REPOS_DIR="${REPOS_DIR:-./repos}"
   REPO_REF="${REPO_REF:-main}"
   detect_runtime
+  # Multi-node cluster emulation: fold in the compute-node agents (node-1/node-2)
+  # so the master reports multiple nodes online. Opt-in via --cluster.
+  if [ "${WANT_CLUSTER:-0}" = 1 ]; then
+    COMPOSE_FILES+=(-f docker-compose.cluster.yml)
+    c "cluster emulation ON — adds compute-node agents (node-1, node-2)"
+  fi
   configure_lan_access
 }
 
@@ -316,7 +361,19 @@ pull_all() { local r; for r in "${REPOS[@]}"; do pull_one "$r"; done; }
 
 # $ENGINE_SUDO is "" normally, or "sudo" when rootless podman needs rootful access
 # for the VM path (set by detect_runtime). Unquoted so empty expands to nothing.
-dc() { $ENGINE_SUDO docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" "$@"; }
+#
+# INFINIZATION_DISABLE_SANDBOX (the --sandbox/--no-sandbox toggle) must reach the
+# `docker compose` interpolation. When ENGINE_SUDO=sudo the engine runs rootful,
+# and sudo resets the environment by default — so an exported var would be lost.
+# We forward it explicitly via `env VAR=val` AFTER sudo (env runs as the target
+# user and sets the var, bypassing sudo's env_reset). When the var is unset the
+# array is empty and dc() behaves exactly as before.
+dc() {
+  local envfwd=()
+  [ -n "${INFINIZATION_DISABLE_SANDBOX:-}" ] \
+    && envfwd=(env "INFINIZATION_DISABLE_SANDBOX=$INFINIZATION_DISABLE_SANDBOX")
+  $ENGINE_SUDO ${envfwd[@]+"${envfwd[@]}"} docker compose --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" "$@"
+}
 
 cmd="${1:-up}"; shift || true
 
@@ -327,6 +384,22 @@ case "$cmd" in
       case "$a" in
         --kvm)    export KVM=on ;;
         --no-kvm) export KVM=off ;;
+        # QEMU seccomp sandbox toggle. DEFAULT is OFF (the compose default,
+        # INFINIZATION_DISABLE_SANDBOX=1): this dev stack runs QEMU inside a
+        # rootless-podman container whose substrate kills a sandboxed device-init
+        # syscall with SIGSYS, so VMs would fail to boot with the sandbox on.
+        # Pass --sandbox to opt back INTO QEMU's seccomp sandbox (defense-in-depth)
+        # on a substrate where it works.
+        --sandbox)    export INFINIZATION_DISABLE_SANDBOX=0
+                      c "QEMU seccomp sandbox: ON (--sandbox)" ;;
+        --no-sandbox) export INFINIZATION_DISABLE_SANDBOX=1
+                      c "QEMU seccomp sandbox: OFF (--no-sandbox, default)" ;;
+        # Multi-node cluster emulation (docker-compose.cluster.yml): the master
+        # plus node-1/node-2 compute-agent heartbeats, all on this one host. The
+        # master itself always comes up as master (default); this only adds the
+        # emulated compute nodes so you can watch several nodes report online.
+        --cluster)    WANT_CLUSTER=1 ;;
+        --no-cluster) WANT_CLUSTER=0 ;;
         *) passthrough+=("$a") ;;
       esac
     done
