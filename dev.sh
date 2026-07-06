@@ -37,7 +37,10 @@
 #   ./dev.sh pull          fast-forward every repo to its latest origin/<ref>
 #   ./dev.sh restart [svc] restart the stack (or one service)
 #   ./dev.sh status        compose ps
-#   ./dev.sh build-infiniservice   cross-compile the Rust guest agent
+#   ./dev.sh build-infiniservice   cross-compile the Rust guest agent (also built
+#                                  automatically by `up` on a KVM host when missing;
+#                                  bypass/force with up --skip-infiniservice /
+#                                  --rebuild-infiniservice)
 #   ./dev.sh clean         down -v + remove built images
 #
 # Source repos are cloned into $REPOS_DIR (default ./repos) and bind-mounted.
@@ -282,6 +285,40 @@ ensure_master_env() {
   ensure_env_key INFINIBAY_NODE_NAME    master                     "multi-node: stable identity of this master node"
   ensure_env_key INFINIBAY_NODE_ROLE    master                     "multi-node: this dev host is the cluster master"
   ensure_env_key INFINIBAY_CLUSTER_TOKEN dev-insecure-cluster-token "multi-node: cluster bootstrap secret (DEV ONLY — use openssl rand -hex 32 for real multi-host)"
+  # Setup-system defaults (safe for existing files / non-interactive runs that skip
+  # the TUI): managed DB on, published ports bound to all interfaces.
+  ensure_env_key COMPOSE_PROFILES       managed-db                 "compose profiles active (managed-db → run the bundled postgres; the TUI clears this for an external DB)"
+  ensure_env_key PORT_BIND              0.0.0.0                    "host interface published ports bind to (127.0.0.1 = loopback-only, or a LAN IP = pin the NIC)"
+}
+
+# Phase A first-run bootstrap gate. True when the SETUP_DONE marker is absent AND
+# this is an interactive TTY. Non-interactive/CI runs skip the TUI and use whatever
+# .env.docker holds, preserving prior behavior. Set SETUP_SKIP=1 to force-skip.
+setup_needed() {
+  [ "${SETUP_SKIP:-0}" = 1 ] && return 1
+  [ -t 0 ] || return 1
+  grep -qE '^[[:space:]]*SETUP_DONE=1' "$ENV_FILE" 2>/dev/null && return 1
+  return 0
+}
+
+# Run the Phase A TUI (setup-tui/): it collects pre-boot config, writes .env.docker
+# and appends SETUP_DONE=1. Prefers host Node; falls back to an ephemeral node:20
+# container (which also runs the external-DB probe from the backend's network view).
+# $1 non-empty → reconfigure mode (re-run even with SETUP_DONE; preserves secrets).
+run_setup_tui() {
+  local reconfigure="${1:-}" tui_dir="./setup-tui" host_ip
+  host_ip="$(detect_host_ip)"
+  if command -v node >/dev/null 2>&1; then
+    if [ ! -d "$tui_dir/node_modules" ]; then
+      c "installing setup-tui dependencies (first run)…"
+      ( cd "$tui_dir" && npm install --no-audit --no-fund --loglevel=error ) || { warn "setup-tui dependency install failed"; return 1; }
+    fi
+    node "$tui_dir/src/index.js" --env-file "$ENV_FILE" --host-ip "$host_ip" ${reconfigure:+--reconfigure}
+  else
+    c "host Node not found — running the setup TUI in a node:20 container"
+    $ENGINE_SUDO docker run --rm -it -v "$PWD:/work" -w /work/setup-tui docker.io/library/node:20 \
+      sh -lc "npm install --no-audit --no-fund --loglevel=error && node src/index.js --env-file \"/work/$ENV_FILE\" --host-ip '$host_ip' ${reconfigure:+--reconfigure}"
+  fi
 }
 
 # Pick a Compose Spec v2 provider. These files use v2-only features (top-level
@@ -316,10 +353,22 @@ ensure_env() {
     cp "$ENV_EXAMPLE" "$ENV_FILE"
   fi
   ensure_master_env
+  # Phase A: first-run setup TUI (writes .env.docker + SETUP_DONE=1) BEFORE we
+  # source the file, so the collected values take effect this run. Skipped on
+  # non-interactive/CI runs and once SETUP_DONE is present.
+  if setup_needed || [ "${WANT_RECONFIGURE:-0}" = 1 ]; then
+    run_setup_tui "${WANT_RECONFIGURE:-}" || die "setup cancelled"
+  fi
   # shellcheck disable=SC1090
   set -a; . "./$ENV_FILE"; set +a
   REPOS_DIR="${REPOS_DIR:-./repos}"
   REPO_REF="${REPO_REF:-main}"
+  # External DB (DATABASE_URL set by the TUI): overlay the override that points the
+  # backend at it. The bundled postgres is already excluded via COMPOSE_PROFILES.
+  if [ -n "${DATABASE_URL:-}" ]; then
+    COMPOSE_FILES+=(-f docker-compose.external-db.yml)
+    c "external database configured — bundled postgres disabled"
+  fi
   detect_runtime
   # Multi-node cluster emulation: fold in the compute-node agents (node-1/node-2)
   # so the master reports multiple nodes online. Opt-in via --cluster.
@@ -396,7 +445,48 @@ dc() {
   local envfwd=()
   [ -n "${INFINIZATION_DISABLE_SANDBOX:-}" ] \
     && envfwd=(env "INFINIZATION_DISABLE_SANDBOX=$INFINIZATION_DISABLE_SANDBOX")
-  $ENGINE_SUDO ${envfwd[@]+"${envfwd[@]}"} "${COMPOSE_CMD[@]}" --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" "$@"
+  # Turn COMPOSE_PROFILES (comma list) into explicit --profile flags. Passing them
+  # on the CLI works on both docker compose AND podman-compose, whereas relying on
+  # the COMPOSE_PROFILES env var alone is not honored by every provider (and sudo
+  # strips the environment on the KVM path anyway).
+  local profile_flags=()
+  if [ -n "${COMPOSE_PROFILES:-}" ]; then
+    local _oldifs="$IFS" p; IFS=','
+    for p in $COMPOSE_PROFILES; do [ -n "$p" ] && profile_flags+=(--profile "$p"); done
+    IFS="$_oldifs"
+  fi
+  $ENGINE_SUDO ${envfwd[@]+"${envfwd[@]}"} "${COMPOSE_CMD[@]}" --env-file "$ENV_FILE" "${COMPOSE_FILES[@]}" ${profile_flags[@]+"${profile_flags[@]}"} "$@"
+}
+
+# ── infiniservice guest agent ────────────────────────────────────────────────
+# The backend serves the compiled in-guest agent to Linux/Windows guests over HTTP
+# (GET /infiniservice/<platform>/binary), reading it from the shared infinibay_base
+# volume at $INFINIBAY_BASE_DIR/infiniservice/binaries/<platform>/. It is NOT built
+# by the normal image build, so a fresh checkout — or a `down -v`/`clean` that wiped
+# the volume — has none, and guests would 404 the agent and never phone home.
+
+# deploy.sh writes the Linux ELF and the Windows .exe together, so the Linux binary
+# is a reliable "already compiled?" signal. Path is relative to the volume root.
+INFINISERVICE_BUILT_MARKER="infiniservice/binaries/linux/infiniservice"
+
+# Returns 0 if the agent is already compiled into the infinibay_base volume. Reads
+# the volume's host mountpoint, so it works before the stack is up and needs no
+# helper image. Runs through $ENGINE_SUDO so it inspects the same (rootless or
+# rootful) volume `dc` uses. Any uncertainty (no volume / no mountpoint) → 1.
+infiniservice_built() {
+  local vol mp
+  vol="$($ENGINE_SUDO docker volume ls --format '{{.Name}}' 2>/dev/null | grep -E '_infinibay_base$' | head -n1 || true)"
+  [ -n "$vol" ] || return 1
+  mp="$($ENGINE_SUDO docker volume inspect -f '{{ .Mountpoint }}' "$vol" 2>/dev/null || true)"
+  [ -n "$mp" ] || return 1
+  $ENGINE_SUDO test -f "$mp/$INFINISERVICE_BUILT_MARKER"
+}
+
+# Cross-compile the agent (Windows .exe + Linux ELF) into infinibay_base. Slow.
+build_infiniservice() {
+  clone_one infiniservice
+  c "cross-compiling infiniservice (Windows .exe + Linux ELF)… this is slow."
+  dc --profile builders run --rm --build infiniservice-builder
 }
 
 cmd="${1:-up}"; shift || true
@@ -424,12 +514,38 @@ case "$cmd" in
         # emulated compute nodes so you can watch several nodes report online.
         --cluster)    WANT_CLUSTER=1 ;;
         --no-cluster) WANT_CLUSTER=0 ;;
+        # Re-run the Phase A setup TUI even when SETUP_DONE is present (preserves
+        # existing secrets), then continue the normal up.
+        --reconfigure) WANT_RECONFIGURE=1 ;;
+        # Guest-agent build control. `up` auto-builds infiniservice when a KVM host
+        # has none (see below). Bypass, or force a fresh cross-compile:
+        --skip-infiniservice)    SKIP_INFINISERVICE=1 ;;
+        --rebuild-infiniservice) WANT_REBUILD_INFINISERVICE=1 ;;
         *) passthrough+=("$a") ;;
       esac
     done
     ensure_env   # detect_runtime here picks control-plane vs KVM and sets ENGINE_SUDO
     clone_all
     [ "$KVM_ACTIVE" = 1 ] && ensure_host_modules
+    # Guest agent: build it once, automatically, when missing — otherwise a fresh
+    # install's VMs 404 the agent (GET /infiniservice/<platform>/binary) and never
+    # phone home. Detection is a cheap file check in the infinibay_base volume, so
+    # this is a no-op on every later `up`. Only on a KVM host (no VMs → nothing to
+    # serve it to in control-plane-only mode). Flags: --skip-infiniservice bypasses,
+    # --rebuild-infiniservice forces a fresh cross-compile.
+    if [ "${WANT_REBUILD_INFINISERVICE:-0}" = 1 ]; then
+      c "rebuilding the infiniservice guest agent (--rebuild-infiniservice)…"
+      build_infiniservice
+    elif [ "${SKIP_INFINISERVICE:-0}" = 1 ]; then
+      warn "--skip-infiniservice: guests will 404 the agent until you run ./dev.sh build-infiniservice."
+    elif [ "$KVM_ACTIVE" != 1 ]; then
+      : # control-plane-only: no VMs to serve the agent to — skip the slow build.
+    elif infiniservice_built; then
+      c "infiniservice guest agent already compiled — skipping build."
+    else
+      warn "infiniservice guest agent not compiled yet — building it now so new VMs can install it (slow, one-time)."
+      build_infiniservice
+    fi
     c "building images + starting stack…"
     c "first run installs all deps inside the containers — give it several minutes."
     c "  backend  → http://localhost:${BACKEND_PORT:-4000}/graphql"
@@ -448,14 +564,19 @@ case "$cmd" in
   restart) ensure_env; dc restart "$@" ;;
   pull)    ensure_env; pull_all ;;
   build-infiniservice)
-    ensure_env; clone_one infiniservice
-    c "cross-compiling infiniservice (Windows .exe + Linux ELF)… this is slow."
-    dc --profile builders run --rm --build infiniservice-builder
+    ensure_env; build_infiniservice
     ;;
   clean)
     ensure_env
     warn "removing volumes (db, node_modules, caches) and built images…"
     dc --profile builders down -v --rmi local || true
     ;;
-  *) die "unknown command '$cmd'. Try: up | down | logs | pull | restart | status | build-infiniservice | clean" ;;
+  reconfigure)
+    # Re-run the Phase A setup TUI (preserving existing secrets) without starting
+    # the stack. ensure_env triggers the TUI because WANT_RECONFIGURE=1.
+    WANT_RECONFIGURE=1
+    ensure_env
+    c "Reconfigured $ENV_FILE. Run ./dev.sh up to (re)start the stack with the new settings."
+    ;;
+  *) die "unknown command '$cmd'. Try: up | down | logs | pull | restart | status | build-infiniservice | clean | reconfigure" ;;
 esac

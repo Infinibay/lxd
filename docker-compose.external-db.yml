@@ -1,0 +1,18 @@
+# External-DB override. Added by dev.sh (COMPOSE_FILES) ONLY when DATABASE_URL is
+# set in .env.docker — i.e. the setup TUI chose an external PostgreSQL. The bundled
+# postgres service is already excluded (its "managed-db" compose profile is off),
+# so here we just point the backend at the external DB.
+#
+# Kept as a separate file (rather than nested defaults in docker-compose.yml)
+# because podman-compose cannot interpolate nested ${A:-${B:-c}} expressions. All
+# values below are plain single-level ${VAR} reads from .env.docker, which the TUI
+# populated (DATABASE_URL + PGHOST/PGPORT/PGUSER/PGPASSWORD/PGDATABASE).
+services:
+  backend:
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      PGHOST: ${PGHOST}
+      PGPORT: ${PGPORT}
+      PGUSER: ${PGUSER}
+      PGPASSWORD: ${PGPASSWORD}
+      PGDATABASE: ${PGDATABASE}

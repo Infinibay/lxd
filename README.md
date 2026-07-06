@@ -1,324 +1,201 @@
-# Infinibay LXD Deployment
+# Infinibay — LXD deployment & Docker/Podman dev stack
 
-LXD-based containerization for the Infinibay VDI management platform.
+Self-hosting and development for the **Infinibay** VDI platform — the backend API,
+the web UI, and the QEMU/KVM VM hypervisor. This repo ships **two independent ways
+to run the stack**:
 
-## Status
+| Path | Command | Use it for |
+|------|---------|------------|
+| 🐳 **Docker / Podman dev stack** | `./dev.sh up` | **Day-to-day development** — one command, hot-reload, clones the app repos and bind-mounts them |
+| 📦 **LXD deployment** | `sudo ./setup.sh` → `./run.sh` | **Self-hosting** — LXD system containers, systemd services, `/dev/kvm` passthrough |
 
-✅ **Production Ready** - Automated provisioning with intelligent orchestration and multi-distro support
+Both drive the same Infinibay repos (`backend`, `frontend`, `infinization`,
+`infiniservice`) and both run real VMs on a Linux host with `/dev/kvm`.
 
-## Quick Links
-
-- **[INSTALL.md](./INSTALL.md)** - ⭐ Complete installation and deployment guide
-- **Project Root**: [../](../)
-- **Installer Reference**: [../installer/](../installer/)
-
-## Why LXD?
-
-LXD provides native support for KVM/libvirt, making it ideal for running VMs inside containers without privileged mode or complex workarounds.
-
-**Key advantages:**
-- ✅ Native KVM device access - no `--privileged` mode needed
-- ✅ Full systemd support inside containers
-- ✅ Designed for nested virtualization
-- ✅ YAML-based configuration (lxd-compose)
-- ✅ Better security isolation for VM workloads
-- ✅ Minimal performance overhead (~5%)
-
-### Supported Operating Systems
-
-Infinibay's LXD deployment supports multiple Linux distributions with automatic package manager detection:
-
-- **Debian/Ubuntu** - Uses `apt-get` (auto-detected)
-- **RHEL/CentOS/Fedora/Rocky/AlmaLinux** - Uses `dnf` or `yum` (auto-detected)
-- **openSUSE/SLES** - Uses `zypper` (auto-detected)
-- **Arch/Manjaro/EndeavourOS** - Uses `pacman` (auto-detected)
-
-The setup script automatically detects your distribution and uses the appropriate package manager. LXD installation path (snap vs native package) is also auto-detected.
-
-## Overview
-
-This directory contains LXD-based containerization for Infinibay using **lxd-compose**.
-
-**Structure:**
-```
-lxd/
-├── run.sh                         # Main management script ⭐
-├── .lxd-compose.yml               # Main lxd-compose config
-├── envs/
-│   └── infinibay.yml              # Infinibay project definition
-├── profiles/
-│   └── templates/                 # LXD profile templates
-├── values.yml.example             # Configuration template
-├── setup.sh                       # Automated installation
-├── INSTALL.md                     # Complete guide
-└── README.md                      # This file
-```
-
-**Note:** lxd-compose uses a different structure than docker-compose:
-- Main config: `.lxd-compose.yml`
-- Projects: `envs/*.yml` files
-- Commands: `apply infinibay`, `destroy infinibay`, `stop infinibay`
-
-## Architecture
-
-The deployment creates 4 LXD containers:
-
-1. **infinibay-postgres** - PostgreSQL database
-2. **infinibay-redis** - Redis cache
-3. **infinibay-backend** - Node.js API + libvirt-node + infiniservice + KVM access
-4. **infinibay-frontend** - Next.js web interface
-
-## Quick Start
-
-```bash
-# 1. Clone repository and navigate to lxd directory
-cd infinibay/lxd
-
-# 2. Run setup (installs LXD, lxd-compose, detects package manager)
-sudo ./setup.sh
-
-# 3. IMPORTANT: Activate lxd group (REQUIRED!)
-newgrp lxd
-# This activates the group in your current session
-# You need to do this after setup.sh adds you to the lxd group
-
-# 4. Configure environment variables
-# Option A: Edit the auto-generated .env (RECOMMENDED)
-nano .env
-# setup.sh already created .env with secure auto-generated passwords
-# IMPORTANT: Change ADMIN_PASSWORD from auto-generated to your own!
-
-# Option B: If you prefer to start from .env.example before setup.sh
-# cp .env.example .env && nano .env
-# Then run setup.sh, which will detect and preserve your .env
-
-# 5. Deploy and start Infinibay (smart default - does everything!)
-./run.sh
-# This one command:
-# - Creates containers if they don't exist
-# - Starts containers if they're stopped
-# - Provisions if not already done (installs PostgreSQL, Redis, Node.js, Rust, libvirt)
-# - Shows access URLs when ready
-# Takes 5-10 minutes on first run
-
-# 6. Access Infinibay
-# URLs will be displayed after ./run.sh completes
-# Frontend: http://<frontend-ip>:3000
-# Backend API: http://<backend-ip>:4000
-```
-
-**What happens:**
-- `setup.sh` - Installs LXD, lxd-compose, detects your distro and package manager, auto-detects LXD path, generates `.env` with secure passwords
-- `newgrp lxd` - ⚠️ **REQUIRED** - Activates lxd group permissions
-- `.env configuration` - ⚠️ **IMPORTANT** - Review and change ADMIN_PASSWORD (auto-generated passwords should be personalized!)
-- `./run.sh` - Intelligent orchestration: creates containers, provisions software, starts everything
-  - Checks if environment exists → creates if not
-  - Checks if containers are running → starts if stopped
-  - Checks if provisioned → provisions if not (tracked via LXD metadata)
-  - Skips already-completed steps automatically
-- Containers have shared `/opt/infinibay` directory (your code)
-- Data persists in `/data` directories even if containers are destroyed
-
-## Important: Group Membership
-
-After running `setup.sh`, you may need to activate the `lxd` group:
-
-**Option 1 (Quick - current session only):**
-```bash
-newgrp lxd
-```
-
-**Option 2 (Permanent - requires re-login):**
-```bash
-logout
-# Then login again
-```
-
-**How to check if you're in the group:**
-```bash
-groups | grep lxd
-# Should show 'lxd' in the output
-```
-
-## Common Operations
-
-### Recommended Workflow (Smart Default)
-
-```bash
-# One command does everything - creates, provisions, and starts
-./run.sh              # Smart default - handles everything automatically
-
-# Fresh start - destroy and recreate everything
-./run.sh redo         # or: ./run.sh rd
-
-# Quick status check
-./run.sh status       # or: ./run.sh s
-```
-
-### Using run.sh (All Commands)
-
-```bash
-# Smart default workflow (recommended)
-./run.sh              # Does everything: create → provision → start
-
-# Manual step-by-step (if you prefer explicit control)
-./run.sh apply        # Shortcuts: a, ap - Create containers
-./run.sh provision    # Shortcuts: p, pr - Install software
-
-# Container management
-./run.sh status       # Shortcuts: s, st - Check status
-./run.sh destroy      # Shortcuts: d, de - Remove containers
-./run.sh redo         # Shortcut: rd - Destroy and recreate (fresh start)
-./run.sh restart      # Shortcuts: r, re - Legacy alias for redo
-
-# Execute commands in containers
-./run.sh exec backend bash      # Shortcuts: e, ex
-./run.sh exec postgres psql -U infinibay
-./run.sh exec frontend npm run dev
-
-# Follow container logs
-./run.sh logs backend           # Shortcuts: l, lo
-./run.sh logs postgres
-
-# Update profiles only (after modifying templates)
-./run.sh setup-profiles         # Shortcut: sp
-
-# Show help with all shortcuts
-./run.sh help
-```
-
-**Complete shortcut reference:**
-| Command | Shortcuts | Description |
-|---------|-----------|-------------|
-| `apply` | `a`, `ap` | Create and start containers |
-| `provision` | `p`, `pr` | Install software in containers |
-| `redo` | `rd` | Destroy and recreate everything |
-| `destroy` | `d`, `de` | Stop and remove all containers |
-| `restart` | `r`, `re` | Legacy alias for redo |
-| `status` | `s`, `st` | Show container status |
-| `setup-profiles` | `sp` | Update LXD profiles only |
-| `exec` | `e`, `ex` | Execute command in container |
-| `logs` | `l`, `lo` | Follow container logs |
-
-### Direct LXC Commands
-
-```bash
-# View container status
-sg lxd -c "lxc list"
-
-# Execute commands
-sg lxd -c "lxc exec infinibay-backend -- bash"
-
-# Create snapshot
-sg lxd -c "lxc snapshot infinibay-backend backup-$(date +%Y%m%d)"
-
-# List snapshots
-lxc info infinibay-backend
-```
-
-## Current Status
-
-**Implemented and Working:**
-- ✅ Creates 4 Ubuntu containers with resource limits
-- ✅ Mounts shared `/opt/infinibay` directory (your code)
-- ✅ Persistent `/data` directories for each service
-- ✅ Automated provisioning scripts for all containers
-- ✅ PostgreSQL installation and configuration
-- ✅ Redis installation and configuration
-- ✅ Node.js 20.x LTS + npm
-- ✅ Rust toolchain (for libvirt-node native modules)
-- ✅ libvirt + KVM with /dev/kvm device access
-- ✅ Systemd services ready for backend/frontend
-- ✅ Network connectivity between containers
-- ✅ Universal package manager support (apt/dnf/zypper/pacman)
-- ✅ Automatic LXD path detection (snap vs native)
-- ✅ Smart default orchestration with state tracking
-- ✅ Provisioning state persistence via LXD metadata
-
-**Still Manual:**
-- ⏳ npm install in backend/frontend
-- ⏳ Database migrations
-- ⏳ Starting Infinibay services
-- ⏳ Application configuration
-
-**After provisioning, you need to:**
-1. Install npm dependencies in backend/frontend
-2. Run database migrations
-3. Configure and start Infinibay services
-
-See [INSTALL.md](./INSTALL.md) for detailed instructions.
-
-## Troubleshooting
-
-### "No project selected" error
-```bash
-# Make sure you specify the project name
-lxd-compose apply infinibay  # ✓ Correct
-lxd-compose apply             # ✗ Wrong
-```
-
-### "Unable to read the configuration file" error
-```bash
-# You need to be in the lxd group
-newgrp lxd
-# Or logout/login
-```
-
-### "Permission denied" on LXD socket
-```bash
-# Check if you're in lxd group
-groups | grep lxd
-
-# If not, the setup script should have added you
-# Just run:
-newgrp lxd
-```
-
-### Smart default fails at provisioning step
-```bash
-# Check individual container status
-./run.sh status
-
-# Use redo to start fresh (destroys and recreates everything)
-./run.sh redo
-```
-
-### Want to force re-provisioning
-```bash
-# Option 1: Use redo command (destroys and recreates everything)
-./run.sh redo
-
-# Option 2: Manually clear provisioning state for specific container
-lxc config unset infinibay-backend user.provisioned
-lxc config unset infinibay-frontend user.provisioned
-lxc config unset infinibay-postgres user.provisioned
-lxc config unset infinibay-redis user.provisioned
-# Then run: ./run.sh
-```
-
-## vs Native Installer
-
-| Aspect | LXD (Current) | Native Installer |
-|--------|---------------|------------------|
-| **Status** | 🚧 In Development | ✅ Production Ready |
-| **Provisioning** | Manual for now | ✅ Fully automated |
-| **Isolation** | ✅ Full container isolation | ❌ System-wide |
-| **Rollback** | ✅ Snapshots | ❌ Manual |
-| **Complexity** | Medium | Low |
-
-**Recommendation:** Use the [native installer](../installer/) for production deployments until LXD provisioning is complete.
-
-## Contributing
-
-See [INSTALL.md](./INSTALL.md) for development workflows.
-
-## References
-
-- [LXD Documentation](https://documentation.ubuntu.com/lxd/)
-- [lxd-compose Documentation](https://mottainaici.github.io/lxd-compose-docs/)
-- [Infinibay Installer](../installer/) - **Recommended for production**
+- Dev-stack details → **[docker/README.md](./docker/README.md)**
+- LXD install walkthrough → **[INSTALL.md](./INSTALL.md)**
 
 ---
 
-**Last Updated**: 2025-11-21
-**Status**: Production Ready
+## 🐳 Docker / Podman dev stack (`dev.sh`)
+
+One-command, hot-reload dev environment on **Docker or rootless Podman**. It clones
+the app repos into `./repos/`, bind-mounts them into the containers, and reloads on
+save — edit code, the stack picks it up live.
+
+```bash
+./dev.sh up                  # clone repos + build images + start (live logs)
+./dev.sh up -d               # detached
+./dev.sh up --cluster        # + emulate compute nodes (node-1/node-2) on this host
+./dev.sh down [-v]           # stop (-v also drops volumes: db, node_modules, …)
+./dev.sh logs [service]      # follow logs
+./dev.sh pull                # fast-forward every repo to origin/main (keeps local edits)
+./dev.sh build-infiniservice # cross-compile the in-guest agent (see note below)
+./dev.sh status | restart | clean
+```
+
+`make up`, `make down`, `make logs S=backend`, … wrap the same commands. First `up`
+clones the repos and installs all deps **inside** the containers (a few minutes, once).
+
+Once up:
+- Frontend → <http://localhost:3000>
+- Backend GraphQL → <http://localhost:4000/graphql>
+- Postgres → `localhost:5432` (user/db/pass `infinibay`)
+
+### Key operational notes
+
+- **KVM is auto-detected.** On Linux with `/dev/kvm`, VMs are enabled automatically
+  (force with `--kvm` / `--no-kvm`, or `KVM=on|off`). Without `/dev/kvm` (e.g. macOS)
+  it runs control-plane-only — the whole UI/API/DB works, VM create/start does not.
+- **Rootless Podman is supported.** The KVM override grants the backend container
+  `/dev/kvm` via Podman's `keep-groups`, so **your host user must be in the `kvm`
+  group** (`sudo usermod -aG kvm $USER`, then re-login).
+- **Guest VMs need `infiniservice`.** During install, a guest downloads the in-guest
+  agent from the backend at `http://<gateway>:4000/infiniservice/{linux,windows}/binary`.
+  That agent is a Rust binary that is **not built by `up`** — run
+  **`./dev.sh build-infiniservice` once** (it cross-compiles the Linux ELF + Windows
+  `.exe` into the shared volume the backend serves). Skip it and installs fail
+  mid-way with a 404 fetching the agent. Re-run it after `down -v` / `clean`, which
+  wipe that volume.
+- **`up` clones missing repos but does NOT update existing checkouts** — use
+  `./dev.sh pull` to advance them to `origin/main` (it skips any repo with
+  uncommitted changes, so it never clobbers your edits).
+- **Multi-node:** `--cluster` adds `node-1`/`node-2` compute-agent heartbeats so the
+  master reports several nodes online, all on one host.
+
+Current dev-stack version: **v0.4.0** (tracked in `VERSION`).
+
+---
+
+## 📦 LXD deployment (`setup.sh` / `run.sh`)
+
+LXD system containers via **[lxd-compose](https://mottainaici.github.io/lxd-compose-docs/)** —
+closer to a real self-hosted install: systemd services, `/dev/kvm` passthrough,
+persistent data disks, backup/upgrade tooling.
+
+### Quick start
+
+```bash
+# 1. Install LXD + lxd-compose, detect distro/pkg-manager, generate .env with secrets
+sudo ./setup.sh
+
+# 2. Activate the lxd group — REQUIRED (setup.sh added you to it)
+newgrp lxd                 # or log out and back in
+
+# 3. Review .env — change ADMIN_PASSWORD (setup.sh auto-generated one)
+nano .env
+
+# 4. Bring everything up (smart default: create → provision → start; idempotent)
+./run.sh
+# Prints the frontend (:3000) and backend (:4000/graphql) URLs when ready.
+```
+
+`setup.sh` is multi-distro: it auto-detects **apt / dnf / zypper / pacman** and
+native-vs-snap LXD, initialises LXD (`lxdbr0` + a `dir` storage pool), and seeds
+`.env` with `openssl`-generated secrets.
+
+### Architecture — 3 containers
+
+Defined in `envs/infinibay.yml`:
+
+| Container | Base | Role |
+|-----------|------|------|
+| `infinibay-postgres` | Ubuntu 22.04 | PostgreSQL (data relocated to `/data/pgdata`) |
+| `infinibay-backend`  | Ubuntu 24.04 | Node.js API + `infinization` hypervisor; serves `infiniservice` to guests; `/dev/kvm` passthrough + `security.nesting=true`; proxied on `:4000` |
+| `infinibay-frontend` | Ubuntu 22.04 | Next.js UI (production build); proxied on `:3000` |
+
+KVM is delivered by passing the host `/dev/kvm` char device into the backend
+container (profile `infinibay-backend`); the backend installs `qemu-kvm`/`qemu-utils`
+and joins its user to the `kvm` group. Profiles are templated in
+`profiles/templates/`; each container mounts a host `data/<role>` disk at `/data`,
+so data survives container recreation.
+
+### `run.sh` commands
+
+Run `./run.sh` with **no arguments** for the smart default: it creates the
+environment if missing, starts stopped containers, provisions if not yet
+provisioned, and prints the URLs. Safe to re-run — it skips completed steps.
+
+| Command | Aliases | Description |
+|---------|---------|-------------|
+| *(none)* | — | smart default: create → provision → start |
+| `apply` | `a`, `ap` | create + start containers |
+| `provision` | `p`, `pr` | install software (`provisioning/provision-all.sh`) |
+| `redo` | `rd` | destroy + recreate from scratch |
+| `destroy` | `d`, `de` | remove all containers |
+| `status` | `s` | container status (`lxc list`) |
+| `stop` | `sto` | graceful reverse-order stop (`--force`, `--check-vms`) |
+| `update` | `u` | atomic multi-repo update with backup + rollback |
+| `upgrade` | `ug` | versioned upgrade (`--list`, `--dry-run`, `<version>`) |
+| `backup` | `b`, `bak` | snapshot/backup (`--label`, `--list`, `--clean`, `--enable-schedule`) |
+| `join` | `jn` | enroll THIS host as a compute node of a master (see below) |
+| `setup-profiles` | `sp` | regenerate LXD profiles only |
+| `exec` | `e`, `ex` | `./run.sh exec backend bash` |
+| `logs` | `l`, `lo` | `./run.sh logs backend` (journalctl -f) |
+| `help` | `--help`, `-h` | usage; `help update\|upgrade\|join` for sub-help |
+
+### Multi-node clustering
+
+`./run.sh join <master-url> <token> [node-name]` onboards **this host as an Infinibay
+compute node** of an existing master: a SAS-verified mTLS enrollment that prints a
+6-digit pairing code to approve in the master UI, with optional mDNS discovery of the
+master (`<master-url> = auto`). This is application-level Infinibay clustering — not
+LXD's own cluster feature. (The dev stack emulates the same topology on one host via
+`./dev.sh up --cluster`.)
+
+---
+
+## Troubleshooting
+
+**LXD path**
+- *Permission denied on the LXD socket / "Unable to read the configuration file"* →
+  you're not in the `lxd` group yet: `newgrp lxd` (or re-login). Verify with
+  `groups | grep lxd`.
+- *`lxd-compose` says "No project selected"* → always name the project:
+  `lxd-compose apply infinibay`.
+- *Provisioning failed / want a clean slate* → `./run.sh redo`.
+
+**Dev stack**
+- *VM install can't download infiniservice (`…:4000/infiniservice/... 404`)* → run
+  `./dev.sh build-infiniservice` once, then create a **fresh** VM.
+- *Rootless Podman: QEMU "Could not access KVM kernel module: Permission denied"* →
+  add your user to the `kvm` group and re-login (the compose keeps it via `keep-groups`).
+- *Added a dependency but it isn't installed* → installs only run when `node_modules`
+  is empty: `docker volume rm infinibay-dev_backend_node_modules`, then `./dev.sh up`.
+- *First boot looks stuck* → it's installing deps: `./dev.sh logs backend`.
+- *Private repo clone fails* → authenticate first (`gh auth login`).
+
+---
+
+## Repo layout
+
+```
+lxd/
+├── dev.sh                      # 🐳 Docker/Podman dev stack entrypoint
+├── docker-compose.yml          #    base dev stack
+├── docker-compose.kvm.yml      #    Linux KVM override (/dev/kvm, keep-groups, NET_ADMIN)
+├── docker-compose.cluster.yml  #    multi-node emulation (node-1/node-2)
+├── docker/                     #    entrypoints + dev-stack README
+├── Makefile                    #    thin wrapper over dev.sh
+├── repos/                      #    app repos (cloned by dev.sh, bind-mounted)
+│
+├── setup.sh                    # 📦 LXD host setup (LXD + lxd-compose + .env)
+├── run.sh                      #    LXD management (smart default, provision, join, backup, …)
+├── .lxd-compose.yml            #    lxd-compose config
+├── envs/infinibay.yml          #    LXD project (3 containers)
+├── profiles/templates/         #    LXD profile templates
+├── provisioning/               #    per-container provisioning scripts
+├── upgrades/                   #    versioned upgrade manifests
+└── INSTALL.md                  #    full LXD install guide
+```
+
+## References
+
+- [LXD documentation](https://documentation.ubuntu.com/lxd/) ·
+  [lxd-compose documentation](https://mottainaici.github.io/lxd-compose-docs/)
+- Dev-stack guide: [docker/README.md](./docker/README.md)
+- Full LXD install guide: [INSTALL.md](./INSTALL.md)
+
+---
+
+**Last updated:** 2026-07-06 · dev-stack `VERSION` 0.4.0

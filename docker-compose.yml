@@ -31,12 +31,17 @@ services:
     # 'short-name "postgres:16-bookworm" did not resolve to an alias').
     image: docker.io/library/postgres:16-bookworm
     restart: unless-stopped
+    # Bundled DB runs only under the "managed-db" profile (the default set by the
+    # setup TUI / dev.sh). Choosing an EXTERNAL database clears COMPOSE_PROFILES so
+    # this service is excluded and the backend uses DATABASE_URL instead.
+    profiles: ["managed-db"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-infinibay}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-infinibay}
       POSTGRES_DB: ${POSTGRES_DB:-infinibay}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # PORT_BIND pins the host interface published ports bind to (LAN-only control).
+      - "${PORT_BIND:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -57,6 +62,9 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+        # required:false → when an EXTERNAL DB is chosen (managed-db profile off,
+        # postgres excluded) this dependency is skipped instead of erroring.
+        required: false
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: "4000"
@@ -65,6 +73,9 @@ services:
       # reflection metadata; single-file transpilation emits `Object` for
       # imported types and resolvers throw NoExplicitTypeError at boot. Full
       # type-checking (the default) is required, even though restarts are slower.
+      # Managed DB derives this from POSTGRES_*. An EXTERNAL DB overrides DATABASE_URL
+      # + PG* via docker-compose.external-db.yml (added by dev.sh when DATABASE_URL is
+      # set) — kept in a separate file because podman-compose can't nest ${A:-${B}}.
       DATABASE_URL: postgresql://${POSTGRES_USER:-infinibay}:${POSTGRES_PASSWORD:-infinibay}@postgres:5432/${POSTGRES_DB:-infinibay}?schema=public
       # pg_isready wait (entrypoint)
       PGHOST: postgres
@@ -115,9 +126,18 @@ services:
       RPC_URL: ${RPC_URL:-http://localhost:9090}
       # filesystem roots (shared infinibay_base volume)
       INFINIBAY_BASE_DIR: /opt/infinibay
+      # storage backend the setup TUI selected (drives migration copy-vs-skip via
+      # app/services/storage). Must be in the container env, not just the --env-file.
+      # (INFINIZATION_DISK_DIR is intentionally NOT forwarded: dev disks are
+      # ephemeral and its default path is not a mounted volume.)
+      INFINIBAY_STORAGE_BACKEND: ${INFINIBAY_STORAGE_BACKEND:-local}
+      INFINIBAY_SHARED_STORAGE: ${INFINIBAY_SHARED_STORAGE:-false}
       # optional admin bootstrap consumed by the seed if present
       DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@example.com}
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-password}
+      # setup TUI marker: seed sets AppSettings.devModeAdmin=true → /setup forces a
+      # password change when the insecure dev-default admin was used.
+      INFINIBAY_DEV_MODE_ADMIN: ${INFINIBAY_DEV_MODE_ADMIN:-}
       # dev ergonomics
       RUN_SEED: ${RUN_SEED:-true}
       CHOKIDAR_USEPOLLING: "true"
@@ -129,9 +149,10 @@ services:
       SPICE_PROXY_PORT_MIN: ${SPICE_PROXY_PORT_MIN:-6100}
       SPICE_PROXY_PORT_MAX: ${SPICE_PROXY_PORT_MAX:-6119}
     ports:
-      - "${BACKEND_PORT:-4000}:4000"
+      # PORT_BIND pins the host interface (LAN-only control); default 0.0.0.0.
+      - "${PORT_BIND:-0.0.0.0}:${BACKEND_PORT:-4000}:4000"
       # Console relay range — keep in sync with SPICE_PROXY_PORT_MIN/MAX above.
-      - "${SPICE_PROXY_PORT_MIN:-6100}-${SPICE_PROXY_PORT_MAX:-6119}:${SPICE_PROXY_PORT_MIN:-6100}-${SPICE_PROXY_PORT_MAX:-6119}"
+      - "${PORT_BIND:-0.0.0.0}:${SPICE_PROXY_PORT_MIN:-6100}-${SPICE_PROXY_PORT_MAX:-6119}:${SPICE_PROXY_PORT_MIN:-6100}-${SPICE_PROXY_PORT_MAX:-6119}"
     volumes:
       - ${REPOS_DIR:-./repos}/backend:/workspace/backend
       - ${REPOS_DIR:-./repos}/infinization:/workspace/infinization
@@ -179,7 +200,7 @@ services:
       CHOKIDAR_USEPOLLING: "true"
       NPM_CONFIG_MINIMUM_RELEASE_AGE: *npm-age
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "${PORT_BIND:-0.0.0.0}:${FRONTEND_PORT:-3000}:3000"
     volumes:
       - ${REPOS_DIR:-./repos}/frontend:/workspace/frontend
       - ./docker:/workspace/scripts:ro
