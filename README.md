@@ -34,7 +34,7 @@ save — edit code, the stack picks it up live.
 ./dev.sh status | restart | clean
 
 # Multi-node — run ON A SECOND physical host to add it as a compute node:
-./dev.sh join [master-url]   # discover/confirm the master, SAS pairing, start the node agent
+./dev.sh join http://<master-ip>:4000   # SAS pairing, then start the node agent
 ./dev.sh node up|down|logs|status|restart   # manage that node agent afterwards
 ```
 
@@ -64,9 +64,9 @@ Once up:
 - **`up` clones missing repos but does NOT update existing checkouts** — use
   `./dev.sh pull` to advance them to `origin/main` (it skips any repo with
   uncommitted changes, so it never clobbers your edits).
-- **Multi-node:** this stack always comes up as the cluster **master** and advertises
-  itself on the LAN (mDNS). `--cluster` adds emulated `node-1`/`node-2` heartbeats on
-  this same host; to add a **real second host**, run `./dev.sh join` there — see below.
+- **Multi-node:** this stack always comes up as the cluster **master**. `--cluster`
+  adds emulated `node-1`/`node-2` heartbeats on this same host; to add a **real second
+  host**, run `./dev.sh join http://<master-ip>:4000` there — see below.
 
 ### Multi-node: run a master + add real compute nodes
 
@@ -75,8 +75,9 @@ nodes, each onboarded with a SAS-verified pairing (the same ceremony as the LXD
 `./run.sh join`, wrapped for Docker/Podman).
 
 **1 — The master.** Nothing extra: `./dev.sh up` on this host already **is** the
-master. It seeds a cluster bootstrap token into `.env.docker` and advertises
-`_infinibay-master._tcp` on the LAN so nodes can discover it.
+master. It seeds a cluster bootstrap token into `.env.docker`. Note the master's LAN
+IP (`hostname -I` on the master, or the "reachable from other devices" line that `up`
+prints) — the node needs it.
 
 **2 — Get the cluster token** (the node needs it — it's a shared secret you choose,
 not something issued). On the **master**:
@@ -93,19 +94,20 @@ sed -i "s/^INFINIBAY_CLUSTER_TOKEN=.*/INFINIBAY_CLUSTER_TOKEN=$NEW/" .env.docker
 ./dev.sh up -d                                  # recreate the backend so it picks up $NEW
 ```
 
-**3 — Join, on the SECOND host.** Clone this repo there and run `join`:
+**3 — Join, on the SECOND host.** Clone this repo there and run `join` with the
+master's IP:
 
 ```bash
 git clone https://github.com/Infinibay/lxd && cd lxd
-./dev.sh join                                   # auto-discover the master, then prompt
-#   explicit master:   ./dev.sh join http://<master-ip>:4000
-#   non-interactive:   ./dev.sh join http://<master-ip>:4000 --name worker-1 --token <token>
+./dev.sh join http://<master-ip>:4000           # a bare IP also works → http://<ip>:4000
+#   non-interactive:  ./dev.sh join http://<master-ip>:4000 --name worker-1 --token <token>
 ```
 
-`join` clones `backend` + `infinization`, discovers/confirms the master, offers the
-token from `.env.docker` (paste the master's if it differs), then prints a **6-digit
-pairing code**. Approve it in the master UI (**Infrastructure**) — the codes must
-match. On approval it starts the node agent and the node reports **online**.
+`join` clones `backend` + `infinization`, offers the token from `.env.docker` (paste
+the master's if it differs), then prints a **6-digit pairing code**. Approve it in the
+master UI (**Infrastructure**) — the codes must match. On approval it starts the node
+agent and the node reports **online**. (Run `./dev.sh join` with no URL and it prompts
+for the master IP.)
 
 **4 — Run / manage the node** after joining (config is saved in `.env.node`):
 
@@ -120,17 +122,19 @@ Use `./dev.sh join --no-start` to enrol **without** starting, then `./dev.sh nod
 whenever you want to bring it up.
 
 **Notes**
-- **Auto-discovery needs Avahi** on both hosts (`sudo apt-get install -y avahi-utils`).
-  Without it, `join` still works — just pass the master URL explicitly.
+- **You supply the master URL** (`./dev.sh join http://<master-ip>:4000`, or a bare IP
+  → `http://<ip>:4000`). There is **no LAN auto-discovery**: onboarding is a trust
+  boundary, so the endpoint is explicit and verified via the pairing code — the same
+  model as k3s / Docker Swarm / kubeadm joins, and it works across routed networks.
 - **Heartbeat auth** defaults to **token mode** (works against a default dev master).
   `./dev.sh join --mtls` upgrades to full mutual TLS, which requires the master to run
   with `INFINIBAY_CLUSTER_MTLS=1` (its `:4433` ops server) and its node name as the
   cert CN (`--master-cn`, default `master`).
-- **Current state (v0.5.0):** a joined node **enrols and reports online**; the master
+- **Current state (v0.5.x):** a joined node **enrols and reports online**; the master
   actually hosting/creating VMs on a remote node is still WIP (a later multi-node
   phase). Use this to exercise onboarding today, not yet to run guests on the node.
 
-Current dev-stack version: **v0.5.1** (tracked in `VERSION`).
+Current dev-stack version: **v0.5.2** (tracked in `VERSION`).
 
 ---
 
@@ -266,4 +270,4 @@ lxd/
 
 ---
 
-**Last updated:** 2026-07-08 · dev-stack `VERSION` 0.5.1
+**Last updated:** 2026-07-08 · dev-stack `VERSION` 0.5.2

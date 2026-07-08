@@ -19,17 +19,17 @@
 #   INFINIZATION_DISABLE_SANDBOX=0|1 ./dev.sh up   same, via env (0 = sandbox on)
 #
 # MULTI-NODE: this stack always comes up as the cluster MASTER (a dev cluster
-# token + stable node name are auto-seeded into .env.docker on first `up`), and it
-# advertises itself on the LAN via mDNS so nodes can find it. To also emulate
-# compute nodes on this one host:
+# token + stable node name are auto-seeded into .env.docker on first `up`). To also
+# emulate compute nodes on this one host:
 #   ./dev.sh up --cluster     add node-1/node-2 compute-agent heartbeats
 # To onboard a REAL second physical host as a compute node, run ON THAT HOST:
-#   ./dev.sh join             discover this master, pair (SAS), start the node agent
-#   ./dev.sh join http://<master-ip>:4000     (explicit master, skip discovery)
+#   ./dev.sh join http://<master-ip>:4000     pair (SAS) + start the node agent
+#   ./dev.sh join                             same, but prompts for the master IP
 #   ./dev.sh node logs|status|down|up         manage the node agent afterwards
-# (the token defaults to the one in .env.docker; get the master's with
-#  `grep INFINIBAY_CLUSTER_TOKEN .env.docker` on the master. `./dev.sh join --help`
-#  for options. The LXD self-host path has its own `./run.sh join`.)
+# (You supply the master URL explicitly — find its IP on the master with
+#  `hostname -I`. The token defaults to the one in .env.docker; get the master's
+#  with `grep INFINIBAY_CLUSTER_TOKEN .env.docker`. `./dev.sh join --help` for
+#  options. The LXD self-host path has its own `./run.sh join`.)
 #
 # LAN ACCESS is automatic: `up` detects this host's LAN IP and advertises it so
 # the UI/API are reachable from other devices (the published ports already bind
@@ -65,7 +65,6 @@ KVM_ACTIVE=0   # set to 1 by detect_runtime when the hypervisor override is enab
 
 REPOS=(backend frontend infinization infiniservice)
 GH_ORG="Infinibay"
-MDNS_PIDFILE=".infinibay-mdns.pid"       # backgrounded avahi advertiser (master side)
 NODE_ENV_FILE=".env.node"                # ./dev.sh join writes the compute-node runtime config here
 NODE_COMPOSE_FILE="docker-compose.node.yml"
 
@@ -270,57 +269,6 @@ configure_lan_access() {
   # socket.io reads ALLOWED_ORIGINS too (see SocketService); keep FRONTEND_URL aligned
   # for any older code path that still reads it.
   export FRONTEND_URL="$origins"
-}
-
-# ── multi-node: mDNS master advertising + discovery ──────────────────────────
-# Publish this master as `_infinibay-master._tcp` on the LAN so a compute node can
-# find it with `./dev.sh join` (auto). Best-effort: needs avahi-utils + a running
-# avahi-daemon; when absent we say so and carry on (nodes can still join with an
-# explicit URL). avahi-publish-service registers only while it runs, so we start it
-# detached (survives dev.sh exit and the attached `dc up`) and track its PID.
-advertise_master_mdns() {
-  command -v avahi-publish-service >/dev/null 2>&1 || {
-    warn "avahi-publish-service not found — LAN auto-discovery OFF (nodes can still 'dev.sh join http://<this-ip>:${BACKEND_PORT:-4000}'). Enable with: sudo apt-get install -y avahi-utils"
-    return 0
-  }
-  if [ -f "$MDNS_PIDFILE" ] && kill -0 "$(cat "$MDNS_PIDFILE" 2>/dev/null)" 2>/dev/null; then
-    return 0   # already advertising
-  fi
-  local bp="${BACKEND_PORT:-4000}" name="${INFINIBAY_NODE_NAME:-master}"
-  # Background it DIRECTLY (so $! is avahi-publish's own PID, not a setsid/nohup
-  # wrapper's — stop_mdns must be able to kill the real process) and `disown` it so
-  # this script's exit doesn't SIGHUP it. avahi-publish-service holds the record
-  # only while alive, so it must outlive dev.sh (esp. `up -d`).
-  avahi-publish-service "Infinibay Master (${name})" _infinibay-master._tcp "$bp" \
-    "role=master" "node=${name}" "path=/graphql" >/dev/null 2>&1 &
-  local pid=$!
-  disown "$pid" 2>/dev/null || disown 2>/dev/null || true
-  echo "$pid" > "$MDNS_PIDFILE"
-  c "advertising this master on the LAN via mDNS (_infinibay-master._tcp:${bp}) — nodes can run: ./dev.sh join"
-}
-
-# Tear down the advertiser started by advertise_master_mdns (used by down/clean).
-stop_mdns() {
-  [ -f "$MDNS_PIDFILE" ] || return 0
-  kill "$(cat "$MDNS_PIDFILE" 2>/dev/null)" 2>/dev/null || true
-  rm -f "$MDNS_PIDFILE"
-}
-
-# Best-effort mDNS discovery of an Infinibay master on the LAN (ported from run.sh).
-# Echoes a master URL (http://<ip>:<port>) or nothing. avahi-browse parsable
-# resolved records put the address in field 8 and the port in field 9.
-discover_master() {
-  command -v avahi-browse >/dev/null 2>&1 || return 0
-  local line host port
-  line="$(avahi-browse -tprk _infinibay-master._tcp 2>/dev/null | awk -F';' '$1=="=" {print $8";"$9; exit}')" || true
-  host="${line%%;*}"; port="${line##*;}"
-  if [ -n "$host" ] && [ -n "$port" ]; then
-    printf 'http://%s:%s' "$host" "$port"
-  fi
-  # MUST return 0: the caller assigns this as `url="$(discover_master)"`, and under
-  # `set -e` a non-zero return there kills the whole script silently (before the
-  # "no master found" guard) — a false `&&` chain as the last statement would do that.
-  return 0
 }
 
 # Ensure a key exists in $ENV_FILE; append "KEY=default" (with an optional
@@ -581,12 +529,12 @@ node_default_token() {
   printf '%s' "$t"
 }
 
-# Onboard THIS host as a compute node of a remote master. Guided: discover/confirm
-# the master, pick the token, run the SAS-verified enrollment, then start the
-# heartbeat so the node reports online. See docker-compose.node.yml.
+# Onboard THIS host as a compute node of a remote master. The operator supplies the
+# master URL (arg or prompt), picks the token, runs the SAS-verified enrollment, then
+# starts the heartbeat so the node reports online. See docker-compose.node.yml.
 cmd_join() {
-  local master_url="" node_name="" token="" want_mtls=0 master_cn="" no_start=0 assume_yes=0
-  # first non-flag positional is the master URL (or "auto")
+  local master_url="" node_name="" token="" want_mtls=0 master_cn="" no_start=0
+  # first non-flag positional is the master URL
   while [ $# -gt 0 ]; do
     case "$1" in
       --name)      node_name="${2:-}"; shift 2 ;;
@@ -594,7 +542,6 @@ cmd_join() {
       --master-cn) master_cn="${2:-}"; shift 2 ;;
       --mtls)      want_mtls=1; shift ;;
       --no-start)  no_start=1; shift ;;
-      -y|--yes)    assume_yes=1; shift ;;
       -h|--help)   cmd_join_help; return 0 ;;
       -*)          die "join: unknown flag '$1' (see ./dev.sh join --help)" ;;
       *)           [ -z "$master_url" ] && master_url="$1" || die "join: unexpected argument '$1'"; shift ;;
@@ -606,22 +553,26 @@ cmd_join() {
   clone_one backend
   clone_one infinization
 
-  # ── 1. master URL: explicit, or discover on the LAN ────────────────────────
-  local discovered=0
-  if [ -z "$master_url" ] || [ "$master_url" = "auto" ]; then
-    c "discovering an Infinibay master on the LAN via mDNS…"
-    master_url="$(discover_master || true)"
-    [ -n "$master_url" ] || die "no master found via mDNS. Pass it explicitly: ./dev.sh join http://<master-ip>:4000  (auto-discovery also needs 'sudo apt-get install -y avahi-utils' on BOTH hosts, and the master must have been started with ./dev.sh up so it advertises)"
-    discovered=1
-    c "found master: ${master_url}"
-    if [ "$assume_yes" != 1 ]; then
-      # mDNS is UNAUTHENTICATED — anyone on the LAN can advertise. The token is sent
-      # BEFORE the SAS check, so confirm this is really the master first.
-      warn "this master was found via mDNS, which is NOT authenticated — anyone on the LAN can advertise it, and your token is sent to it BEFORE the pairing-code check."
-      read -r -p "$(printf '\033[1;36m[dev]\033[0m Is %s your master? Send it the bootstrap token? [y/N] ' "$master_url")" _ok || true
-      case "$_ok" in y|Y|yes) ;; *) die "aborted. Pass the URL explicitly to skip discovery: ./dev.sh join http://<master-ip>:4000" ;; esac
+  # ── 1. master URL (REQUIRED — no auto-discovery) ───────────────────────────
+  # Onboarding is a trust boundary: the operator supplies the master endpoint
+  # explicitly (arg or prompt) and verifies it via the SAS pairing. This is what
+  # every serious cluster join does (k3s/swarm/kubeadm) and works across routed
+  # networks, unlike LAN-only discovery.
+  if [ -z "$master_url" ]; then
+    if [ -t 0 ]; then
+      read -r -p "$(printf '\033[1;36m[dev]\033[0m Master IP or URL (e.g. 192.168.1.50 or http://192.168.1.50:4000): ')" master_url || true
     fi
+    [ -n "$master_url" ] || die "the master URL is required: ./dev.sh join http://<master-ip>:4000  (find the IP on the master with: hostname -I)"
   fi
+  # Accept a bare host/IP → prepend http:// and default the port to :4000, while
+  # preserving an explicit scheme/port/path if the operator typed a full URL.
+  case "$master_url" in http://*|https://*) ;; *) master_url="http://$master_url" ;; esac
+  local _sch="${master_url%%://*}" _rest="${master_url#*://}" _path=""
+  local _hp="${_rest%%/*}"
+  if [ "$_rest" != "$_hp" ]; then _path="/${_rest#*/}"; fi
+  case "$_hp" in *:*) ;; *) _hp="${_hp}:4000" ;; esac
+  master_url="${_sch}://${_hp}${_path}"
+  c "master: ${master_url}"
 
   # ── 2. node name ───────────────────────────────────────────────────────────
   [ -n "$node_name" ] || node_name="$(hostname 2>/dev/null || echo node)"
@@ -708,11 +659,14 @@ cmd_join_help() {
 Usage: ./dev.sh join [master-url] [options]
 
 Onboard THIS host as a compute node of a remote Infinibay master (Docker dev
-stack). Discovers/confirms the master, picks the cluster token, runs the
-SAS-verified enrollment, then starts the heartbeat so the node reports online.
+stack). You supply the master URL (as an argument or when prompted), it picks the
+cluster token, runs the SAS-verified enrollment, then starts the heartbeat so the
+node reports online.
 
 Arguments:
-  master-url        e.g. http://192.168.1.50:4000  (omit or 'auto' → mDNS discovery)
+  master-url        the master's IP or URL, e.g. 192.168.1.50 or http://192.168.1.50:4000
+                    (a bare IP is expanded to http://<ip>:4000). REQUIRED — if omitted
+                    you are prompted for it. Find it on the master with: hostname -I
 
 Options:
   --name NODE       node name (default: this host's hostname)
@@ -722,12 +676,11 @@ Options:
                     INFINIBAY_CLUSTER_MTLS=1); default is dev token mode
   --master-cn CN    master certificate CN for --mtls (default: master)
   --no-start        enroll only; don't start the heartbeat
-  -y, --yes         skip the mDNS "is this your master?" confirmation
 
 Examples:
-  ./dev.sh join                              # discover master, guided prompts
-  ./dev.sh join http://192.168.1.50:4000     # explicit master
-  ./dev.sh join auto --name worker-1 --token s3cr3t
+  ./dev.sh join                              # prompts for the master IP + token
+  ./dev.sh join 192.168.1.50                 # bare IP → http://192.168.1.50:4000
+  ./dev.sh join http://192.168.1.50:4000 --name worker-1 --token s3cr3t
 Manage the node afterwards:  ./dev.sh node logs | status | down | up
 EOF
 }
@@ -813,13 +766,10 @@ case "$cmd" in
       c "    frontend → http://${HOST_IP}:${FRONTEND_PORT:-3000}"
       c "    backend  → http://${HOST_IP}:${BACKEND_PORT:-4000}/graphql"
     fi
-    # Advertise this master on the LAN (mDNS) so compute nodes can `./dev.sh join`
-    # (auto). Best-effort + detached, so it survives the attached `dc up` below.
-    advertise_master_mdns
     # ${arr[@]+...} guard keeps an empty array from tripping set -u on bash 3.2
     dc up --build ${passthrough[@]+"${passthrough[@]}"}
     ;;
-  down)    ensure_env; stop_mdns; dc down "$@" ;;
+  down)    ensure_env; dc down "$@" ;;
   logs)    ensure_env; dc logs -f "$@" ;;
   status|ps) ensure_env; dc ps "$@" ;;
   restart) ensure_env; dc restart "$@" ;;
@@ -831,7 +781,6 @@ case "$cmd" in
   node)     cmd_node "$@" ;;
   clean)
     ensure_env
-    stop_mdns
     warn "removing volumes (db, node_modules, caches) and built images…"
     dc --profile builders down -v --rmi local || true
     ;;
