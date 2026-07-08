@@ -592,6 +592,25 @@ dc_node() {
   $ENGINE_SUDO ${envfwd[@]+"${envfwd[@]}"} "${COMPOSE_CMD[@]}" --env-file "$NODE_ENV_FILE" "${NODE_COMPOSE_FILES[@]}" "$@"
 }
 
+# Absolute HOST path of the node's base volume (namespace-correct via $ENGINE_SUDO —
+# rootless and rootful podman keep SEPARATE volumes), or non-zero if it doesn't exist
+# yet. Lets `join` peek at / wipe the enrollment cert without running a container.
+node_base_mountpoint() {
+  local vol
+  vol="$($ENGINE_SUDO docker volume ls --format '{{.Name}}' 2>/dev/null | grep -E 'node_infinibay_base$' | head -n1 || true)"
+  [ -n "$vol" ] || return 1
+  $ENGINE_SUDO docker volume inspect "$vol" --format '{{.Mountpoint}}' 2>/dev/null || return 1
+}
+
+# Delete the node's enrollment identity (cert/key/CA/join-state) from its base volume
+# so `join.ts` pairs fresh instead of short-circuiting on an existing cert. $1 = the
+# volume mountpoint (from node_base_mountpoint). Leaves disks/node_modules untouched.
+node_wipe_enrollment() {
+  local mp="$1"
+  $ENGINE_SUDO rm -f "$mp"/certs/node-cert.pem "$mp"/certs/node-key.pem \
+                     "$mp"/certs/cluster-ca.pem "$mp"/certs/join-state.json
+}
+
 # The cluster bootstrap token to OFFER as the default: the one already in the local
 # .env.docker if present, else the shipped dev default from .env.docker.example.
 # (It only works if the master kept that same token — otherwise paste the master's.)
@@ -611,7 +630,7 @@ cmd_join() {
   # mTLS is ON BY DEFAULT for join: a real remote node exists to receive migrated
   # VMs, and the disk copy is mTLS-only. `--no-mtls` opts down to the dev token
   # channel (same-host emulation / a master still in token mode).
-  local master_url="" node_name="" token="" want_mtls=1 master_cn="" no_start=0 node_kvm=off
+  local master_url="" node_name="" token="" want_mtls=1 master_cn="" no_start=0 node_kvm=off reenroll=0
   # first non-flag positional is the master URL
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -621,6 +640,7 @@ cmd_join() {
       --mtls)      want_mtls=1; shift ;;   # explicit (already the default)
       --no-mtls|--token-mode) want_mtls=0; shift ;;
       --kvm)       node_kvm=on; shift ;;
+      --reenroll|--force) reenroll=1; shift ;;   # skip the prompt: wipe the old cert + pair fresh
       --no-start)  no_start=1; shift ;;
       -h|--help)   cmd_join_help; return 0 ;;
       -*)          die "join: unknown flag '$1' (see ./dev.sh join --help)" ;;
@@ -630,6 +650,36 @@ cmd_join() {
 
   export NODE_KVM="$node_kvm"   # detect_node_runtime (via prepare_node_env) reads this
   prepare_node_env start        # join (re)starts the node container → do the privileged setup
+
+  # ── 0. existing enrollment? decide use-it vs re-enroll ─────────────────────
+  # `join.ts` short-circuits when a node-cert.pem already exists ("nothing to do").
+  # That silently strands you when you actually wanted to re-pair (e.g. the master
+  # was rebuilt / forgot this node, so its old cert no longer verifies). Detect the
+  # cert HERE and let the operator choose — or wipe it up front with --reenroll.
+  local _mp; _mp="$(node_base_mountpoint || true)"
+  if [ -n "$_mp" ] && $ENGINE_SUDO test -f "$_mp/certs/node-cert.pem" 2>/dev/null; then
+    local _act=u
+    if [ "$reenroll" = 1 ]; then
+      _act=r
+    elif [ -t 0 ]; then
+      warn "this node already has an enrollment cert (in volume: $_mp/certs/node-cert.pem)."
+      c "  [u] use it — just (re)start the heartbeat        (= ./dev.sh node up)"
+      c "  [r] re-enroll — delete the cert + pair again     (new 6-digit code)"
+      c "  [c] cancel"
+      local _ans; read -r -p "$(printf '\033[1;36m[dev]\033[0m Choice [u/r/c] (default u): ')" _ans || true
+      case "$_ans" in r|R|rejoin) _act=r ;; c|C) c "cancelled — nothing changed."; return 0 ;; *) _act=u ;; esac
+    fi
+    if [ "$_act" = u ]; then
+      c "using the existing enrollment — (re)starting the heartbeat…"
+      clone_one backend; clone_one infinization
+      dc_node up -d --build node-agent
+      c "node heartbeating with its existing cert. Re-pair later with: ./dev.sh join <master> --reenroll"
+      return 0
+    fi
+    c "re-enrolling — removing the old cert + join state so pairing starts fresh…"
+    node_wipe_enrollment "$_mp"
+  fi
+
   c "onboarding THIS host as a compute node — cloning backend + infinization…"
   clone_one backend
   clone_one infinization
@@ -768,11 +818,18 @@ Options:
                     actually BOOT here (opt-in; layers docker-compose.node.kvm.yml and,
                     under rootless podman, uses sudo/rootful — re-namespaces volumes).
                     Requires /dev/kvm and your user in the `kvm` group on this host.
+  --reenroll        if this node is already enrolled, delete its cert and pair again
+                    (skips the interactive prompt). Alias: --force.
   --no-start        enroll only; don't start the heartbeat
+
+If the node already holds an enrollment cert, join ASKS whether to use it (just start
+the heartbeat, = `node up`) or re-enroll (wipe + new pairing code). --reenroll picks
+re-enroll non-interactively.
 
 Examples:
   ./dev.sh join 192.168.1.50                 # mTLS by default; bare IP → :4000
   ./dev.sh join 192.168.1.50 --kvm --name worker-1   # + boot migrated VMs here
+  ./dev.sh join 192.168.1.50 --reenroll      # force a fresh pairing (wipe old cert)
   ./dev.sh join 192.168.1.50 --no-mtls       # dev token mode (no migration)
 Manage the node afterwards:  ./dev.sh node logs | status | down | up [--kvm]
 EOF

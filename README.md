@@ -156,13 +156,18 @@ to the node's agent. Notes:
   (sudo) — a *different* volume namespace. If you first joined **without** `--kvm`, tear
   the node down (`./dev.sh node down`) and re-join with `--kvm` (fresh enrollment).
   Requires `/dev/kvm` and your node-host user in the `kvm` group.
+- **Re-joining an already-enrolled node:** `join` detects the existing cert and **asks**
+  whether to *use it* (just start the heartbeat, `= node up`) or *re-enroll* (wipe the
+  cert + new pairing code). Use re-enroll when the master was rebuilt / forgot this node,
+  so its old cert no longer verifies. `--reenroll` (alias `--force`) picks it without the
+  prompt. The disks in the node volume are left untouched — only the cert/key/CA are wiped.
 - **Disk dir is unified** at `/opt/infinibay/disks` (a persistent volume) on both master
   and node — cross-node migration pushes the disk's absolute path verbatim. This moved VM
   disks off the old **ephemeral** path: **VMs created before this version have disks on the
   old ephemeral path and are lost on the container recreate** that applies the change —
   recreate them so new disks land in the volume (persistent + migratable).
 
-Current dev-stack version: **v0.6.1** (tracked in `VERSION`).
+Current dev-stack version: **v0.6.2** (tracked in `VERSION`).
 
 ---
 
@@ -299,4 +304,4 @@ lxd/
 
 ---
 
-**Last updated:** 2026-07-08 · dev-stack `VERSION` 0.6.1
+**Last updated:** 2026-07-08 · dev-stack `VERSION` 0.6.2
