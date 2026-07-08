@@ -126,8 +126,9 @@ whenever you want to bring it up.
   → `http://<ip>:4000`). There is **no LAN auto-discovery**: onboarding is a trust
   boundary, so the endpoint is explicit and verified via the pairing code — the same
   model as k3s / Docker Swarm / kubeadm joins, and it works across routed networks.
-- **Heartbeat auth** defaults to **token mode** (works against a default dev master).
-  `./dev.sh join --mtls` upgrades to full mutual TLS.
+- **Heartbeat auth** defaults to **mTLS** (a real remote node exists to receive migrated
+  VMs, and the disk copy is mTLS-only). Pass `--no-mtls` to drop to the dev token channel
+  (same-host emulation, or a master still in token mode) — migration won't work then.
 
 ### Moving VMs to a node (cross-node cold migration)
 
@@ -138,8 +139,8 @@ To actually **migrate a (stopped) VM onto a remote node**, the cluster must run 
 # MASTER — run with mTLS (starts + publishes the :4433 ops server; persisted to .env.docker):
 ./dev.sh up --kvm --mtls
 
-# NODE — join with mTLS + KVM (serves HTTPS on :9443, reachable ops channel, can boot VMs):
-./dev.sh join http://<master-ip>:4000 --mtls --kvm
+# NODE — join (mTLS by default) + KVM (serves HTTPS on :9443, reachable ops channel, can boot VMs):
+./dev.sh join http://<master-ip>:4000 --kvm
 #   approve the SAS in the master UI (Infrastructure)
 ```
 
@@ -153,7 +154,7 @@ to the node's agent. Notes:
   stay in mTLS mode.
 - **`--kvm` on the node is opt-in** and, under rootless podman, switches it to **rootful**
   (sudo) — a *different* volume namespace. If you first joined **without** `--kvm`, tear
-  the node down (`./dev.sh node down`) and re-join with `--mtls --kvm` (fresh enrollment).
+  the node down (`./dev.sh node down`) and re-join with `--kvm` (fresh enrollment).
   Requires `/dev/kvm` and your node-host user in the `kvm` group.
 - **Disk dir is unified** at `/opt/infinibay/disks` (a persistent volume) on both master
   and node — cross-node migration pushes the disk's absolute path verbatim. This moved VM
@@ -161,7 +162,7 @@ to the node's agent. Notes:
   old ephemeral path and are lost on the container recreate** that applies the change —
   recreate them so new disks land in the volume (persistent + migratable).
 
-Current dev-stack version: **v0.6.0** (tracked in `VERSION`).
+Current dev-stack version: **v0.6.1** (tracked in `VERSION`).
 
 ---
 
@@ -298,4 +299,4 @@ lxd/
 
 ---
 
-**Last updated:** 2026-07-08 · dev-stack `VERSION` 0.6.0
+**Last updated:** 2026-07-08 · dev-stack `VERSION` 0.6.1

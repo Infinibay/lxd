@@ -574,8 +574,8 @@ detect_node_runtime() {
     # A node first joined WITHOUT --kvm (rootless) has its enrollment cert + node_modules
     # in the ROOTLESS namespace; enabling --kvm now can't see them → the agent re-enrolls
     # as a duplicate and re-installs. If you enrolled rootless and now want KVM, tear the
-    # rootless stack down (`./dev.sh node down`) and re-run `./dev.sh join --mtls --kvm`.
-    warn "node --kvm ⇒ rootful podman (sudo). Its volumes are a SEPARATE namespace from a rootless enrollment — if you first joined WITHOUT --kvm, down the node and re-join with --mtls --kvm. You may be prompted for your password."
+    # rootless stack down (`./dev.sh node down`) and re-run `./dev.sh join --kvm`.
+    warn "node --kvm ⇒ rootful podman (sudo). Its volumes are a SEPARATE namespace from a rootless enrollment — if you first joined WITHOUT --kvm, down the node and re-join with --kvm. You may be prompted for your password."
     [ "$starting" = start ] && ensure_root_registries
   fi
   # modprobe of host bridge modules is only needed when we actually boot QEMU.
@@ -608,14 +608,18 @@ node_default_token() {
 # master URL (arg or prompt), picks the token, runs the SAS-verified enrollment, then
 # starts the heartbeat so the node reports online. See docker-compose.node.yml.
 cmd_join() {
-  local master_url="" node_name="" token="" want_mtls=0 master_cn="" no_start=0 node_kvm=off
+  # mTLS is ON BY DEFAULT for join: a real remote node exists to receive migrated
+  # VMs, and the disk copy is mTLS-only. `--no-mtls` opts down to the dev token
+  # channel (same-host emulation / a master still in token mode).
+  local master_url="" node_name="" token="" want_mtls=1 master_cn="" no_start=0 node_kvm=off
   # first non-flag positional is the master URL
   while [ $# -gt 0 ]; do
     case "$1" in
       --name)      node_name="${2:-}"; shift 2 ;;
       --token)     token="${2:-}"; shift 2 ;;
       --master-cn) master_cn="${2:-}"; shift 2 ;;
-      --mtls)      want_mtls=1; shift ;;
+      --mtls)      want_mtls=1; shift ;;   # explicit (already the default)
+      --no-mtls|--token-mode) want_mtls=0; shift ;;
       --kvm)       node_kvm=on; shift ;;
       --no-start)  no_start=1; shift ;;
       -h|--help)   cmd_join_help; return 0 ;;
@@ -678,7 +682,7 @@ cmd_join() {
     [ -n "$master_cn" ] || master_cn="master"   # master's cert CN = its INFINIBAY_NODE_NAME (dev default: master)
     local mh="${master_url#*://}"; mh="${mh%%/*}"; mh="${mh%%:*}"
     master_cluster_url="https://${mh}:${INFINIBAY_CLUSTER_PORT:-4433}"
-    warn "full mTLS requested — the MASTER must run with INFINIBAY_CLUSTER_MTLS=1 (its :4433 ops server) and its node name must be '${master_cn}' (override with --master-cn)."
+    warn "heartbeat in full mTLS (default) — the MASTER must run with INFINIBAY_CLUSTER_MTLS=1 (its :4433 ops server) and its node name must be '${master_cn}' (override with --master-cn). If the master is still token-mode, re-run with --no-mtls."
   fi
 
   # ── 5. validate everything that lands in .env.node ─────────────────────────
@@ -732,7 +736,7 @@ cmd_join() {
   c "  logs:    ./dev.sh node logs"
   c "  status:  ./dev.sh node status"
   c "  stop:    ./dev.sh node down"
-  [ "$mtls_flag" != 1 ] && c "  (heartbeat is in dev token mode; for full mTLS re-run: ./dev.sh join --mtls)"
+  [ "$mtls_flag" != 1 ] && c "  (heartbeat is in dev token mode via --no-mtls; cross-node VM migration needs mTLS — re-run without --no-mtls)"
 }
 
 cmd_join_help() {
@@ -753,10 +757,13 @@ Options:
   --name NODE       node name (default: this host's hostname)
   --token TOKEN     cluster bootstrap token (default: prompt, offering the one in
                     .env.docker). Get it on the master: grep INFINIBAY_CLUSTER_TOKEN .env.docker
-  --mtls            heartbeat over full mutual TLS. REQUIRED to receive cross-node VM
-                    MIGRATIONS (the disk copy is mTLS-only). Needs the master started
-                    with `./dev.sh up --mtls` (its :4433 ops server). Default: token mode.
-  --master-cn CN    master certificate CN for --mtls (default: master)
+  --mtls            heartbeat over full mutual TLS. THIS IS THE DEFAULT (explicit flag
+                    kept for clarity) — a real remote node exists to receive cross-node
+                    VM MIGRATIONS and the disk copy is mTLS-only. Needs the master
+                    started with `./dev.sh up --mtls` (its :4433 ops server).
+  --no-mtls         opt down to the dev token heartbeat channel (same-host emulation,
+                    or a master still in token mode). Cross-node migration won't work.
+  --master-cn CN    master certificate CN for mTLS (default: master)
   --kvm             give the node /dev/kvm + host networking so a MIGRATED VM can
                     actually BOOT here (opt-in; layers docker-compose.node.kvm.yml and,
                     under rootless podman, uses sudo/rootful — re-namespaces volumes).
@@ -764,10 +771,9 @@ Options:
   --no-start        enroll only; don't start the heartbeat
 
 Examples:
-  ./dev.sh join                              # prompts for the master IP + token
-  ./dev.sh join 192.168.1.50                 # bare IP → http://192.168.1.50:4000
-  # Full cross-node migration target (real remote node that runs VMs):
-  ./dev.sh join http://192.168.1.50:4000 --mtls --kvm --name worker-1
+  ./dev.sh join 192.168.1.50                 # mTLS by default; bare IP → :4000
+  ./dev.sh join 192.168.1.50 --kvm --name worker-1   # + boot migrated VMs here
+  ./dev.sh join 192.168.1.50 --no-mtls       # dev token mode (no migration)
 Manage the node afterwards:  ./dev.sh node logs | status | down | up [--kvm]
 EOF
 }
@@ -820,7 +826,7 @@ case "$cmd" in
         --cluster)    WANT_CLUSTER=1 ;;
         --no-cluster) WANT_CLUSTER=0 ;;
         # Cluster mTLS. Run the master with its :4433 ops server so REAL remote nodes
-        # (joined with `./dev.sh join --mtls`) can heartbeat, proxy DB-RPC, and receive
+        # (joined with `./dev.sh join`, mTLS by default) can heartbeat, proxy DB-RPC, and receive
         # cross-node VM migrations over mutual TLS. Cluster-wide all-or-nothing: with
         # mTLS on, the token ops path is retired (HTTP 421), so token nodes and the
         # `--cluster` emulation go offline — hence the guard below.
@@ -843,7 +849,7 @@ case "$cmd" in
     # Evaluated AFTER ensure_env so it sees the EFFECTIVE mtls value (the --mtls flag
     # OR a value persisted in .env.docker), not just this run's flag.
     if [ "${INFINIBAY_CLUSTER_MTLS:-}" = 1 ] && [ "${WANT_CLUSTER:-0}" = 1 ]; then
-      die "--mtls and --cluster are mutually exclusive: under cluster mTLS the token heartbeat path returns 421, so the emulated (token-mode) node-1/node-2 cannot register. Use --cluster for same-host token emulation, OR --mtls for real remote mTLS nodes (./dev.sh join --mtls)."
+      die "--mtls and --cluster are mutually exclusive: under cluster mTLS the token heartbeat path returns 421, so the emulated (token-mode) node-1/node-2 cannot register. Use --cluster for same-host token emulation, OR --mtls for real remote mTLS nodes (./dev.sh join, mTLS by default)."
     fi
     clone_all
     [ "$KVM_ACTIVE" = 1 ] && ensure_host_modules
