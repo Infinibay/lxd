@@ -97,6 +97,10 @@ services:
       INFINIBAY_NODE_NAME: ${INFINIBAY_NODE_NAME:-}
       INFINIBAY_NODE_ROLE: ${INFINIBAY_NODE_ROLE:-master}
       INFINIBAY_CLUSTER_MTLS: ${INFINIBAY_CLUSTER_MTLS:-}
+      # Port the cluster mTLS ops server binds when MTLS=1 (heartbeat / DB-RPC /
+      # cert-renew for remote nodes). Must match the published port below and the
+      # node's MASTER_CLUSTER_URL (https://<master>:4433).
+      INFINIBAY_CLUSTER_PORT: ${INFINIBAY_CLUSTER_PORT:-4433}
       # QEMU seccomp sandbox opt-out. This dev stack runs QEMU inside a rootless
       # (podman) container whose substrate seccomp policy kills a sandboxed QEMU
       # device-init syscall with SIGSYS ("VM exited during startup … signal
@@ -126,10 +130,15 @@ services:
       RPC_URL: ${RPC_URL:-http://localhost:9090}
       # filesystem roots (shared infinibay_base volume)
       INFINIBAY_BASE_DIR: /opt/infinibay
+      # VM disk dir — kept INSIDE the shared infinibay_base volume (not the old
+      # ephemeral /var/lib/infinization/disks) so (a) disks survive container
+      # recreates and (b) it is IDENTICAL to a compute node's disk dir. Cross-node
+      # cold migration pushes the disk's ABSOLUTE path verbatim and the receiving
+      # node's LocalDiskStore rejects any path outside its own diskDir, so master
+      # and node MUST agree — keep this == docker-compose.node.yml's INFINIZATION_DISK_DIR.
+      INFINIZATION_DISK_DIR: ${INFINIZATION_DISK_DIR:-/opt/infinibay/disks}
       # storage backend the setup TUI selected (drives migration copy-vs-skip via
       # app/services/storage). Must be in the container env, not just the --env-file.
-      # (INFINIZATION_DISK_DIR is intentionally NOT forwarded: dev disks are
-      # ephemeral and its default path is not a mounted volume.)
       INFINIBAY_STORAGE_BACKEND: ${INFINIBAY_STORAGE_BACKEND:-local}
       INFINIBAY_SHARED_STORAGE: ${INFINIBAY_SHARED_STORAGE:-false}
       # optional admin bootstrap consumed by the seed if present
@@ -153,6 +162,10 @@ services:
       - "${PORT_BIND:-0.0.0.0}:${BACKEND_PORT:-4000}:4000"
       # Console relay range — keep in sync with SPICE_PROXY_PORT_MIN/MAX above.
       - "${PORT_BIND:-0.0.0.0}:${SPICE_PROXY_PORT_MIN:-6100}-${SPICE_PROXY_PORT_MAX:-6119}:${SPICE_PROXY_PORT_MIN:-6100}-${SPICE_PROXY_PORT_MAX:-6119}"
+      # Cluster mTLS ops server (only listens when INFINIBAY_CLUSTER_MTLS=1). Published
+      # so REAL remote compute nodes can reach it (heartbeat / DB-RPC / cert renew).
+      # Harmless when mTLS is off — nothing binds it, so the port just refuses connects.
+      - "${PORT_BIND:-0.0.0.0}:${INFINIBAY_CLUSTER_PORT:-4433}:${INFINIBAY_CLUSTER_PORT:-4433}"
     volumes:
       - ${REPOS_DIR:-./repos}/backend:/workspace/backend
       - ${REPOS_DIR:-./repos}/infinization:/workspace/infinization

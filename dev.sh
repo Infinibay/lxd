@@ -67,6 +67,8 @@ REPOS=(backend frontend infinization infiniservice)
 GH_ORG="Infinibay"
 NODE_ENV_FILE=".env.node"                # ./dev.sh join writes the compute-node runtime config here
 NODE_COMPOSE_FILE="docker-compose.node.yml"
+NODE_KVM_COMPOSE_FILE="docker-compose.node.kvm.yml"  # opt-in KVM overlay so migrated VMs can boot on the node
+NODE_COMPOSE_FILES=(-f "$NODE_COMPOSE_FILE")          # built up by prepare_node_env (+ KVM overlay when --kvm)
 
 c() { printf '\033[1;36m[dev]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[dev]\033[0m %s\n' "$*"; }
@@ -283,6 +285,19 @@ ensure_env_key() {
   c "added $key to $ENV_FILE (default: $default)"
 }
 
+# UPSERT KEY=val in an env FILE: rewrite the line if present, else append. Unlike
+# ensure_env_key (add-if-absent), this is for OPERATOR-TOGGLED knobs that must
+# persist across runs (e.g. INFINIBAY_CLUSTER_MTLS, NODE_KVM) — so a later bare
+# `up`/`node up` keeps the last choice instead of silently reverting.
+upsert_env() {
+  local file="$1" key="$2" val="$3"
+  if [ -f "$file" ] && grep -qE "^[[:space:]]*${key}=" "$file"; then
+    sed -i "s#^[[:space:]]*${key}=.*#${key}=${val}#" "$file"
+  else
+    printf '%s=%s\n' "$key" "$val" >> "$file"
+  fi
+}
+
 # Multi-node MASTER bootstrap. dev.sh always brings THIS host up as the cluster
 # master (the default role is already 'master' in the backend). The cluster token
 # gates the pre-mTLS heartbeat channel that compute-node agents use to register;
@@ -361,6 +376,13 @@ ensure_env() {
     cp "$ENV_EXAMPLE" "$ENV_FILE"
   fi
   ensure_master_env
+  # Persist an operator-toggled cluster-mTLS choice (--mtls/--no-mtls) into the env
+  # FILE so it survives — otherwise a later bare `up` would recreate the backend
+  # WITHOUT mTLS, stop the :4433 ops server, and silently drop an enrolled mTLS node.
+  if [ -n "${WANT_MTLS:-}" ]; then
+    upsert_env "$ENV_FILE" INFINIBAY_CLUSTER_MTLS "$WANT_MTLS"
+    c "cluster mTLS persisted → INFINIBAY_CLUSTER_MTLS=$WANT_MTLS ($ENV_FILE)"
+  fi
   # Phase A: first-run setup TUI (writes .env.docker + SETUP_DONE=1) BEFORE we
   # source the file, so the collected values take effect this run. Skipped on
   # non-interactive/CI runs and once SETUP_DONE is present.
@@ -450,9 +472,13 @@ pull_all() { local r; for r in "${REPOS[@]}"; do pull_one "$r"; done; }
 # user and sets the var, bypassing sudo's env_reset). When the var is unset the
 # array is empty and dc() behaves exactly as before.
 dc() {
-  local envfwd=()
-  [ -n "${INFINIZATION_DISABLE_SANDBOX:-}" ] \
-    && envfwd=(env "INFINIZATION_DISABLE_SANDBOX=$INFINIZATION_DISABLE_SANDBOX")
+  # Vars set by flags (--sandbox / --mtls) reach compose interpolation via `env VAR=val`
+  # AFTER sudo, because sudo's env_reset would otherwise drop the shell export on the
+  # KVM (rootful-podman) path. Empty array → dc behaves exactly as before.
+  local envfwd=() envvars=()
+  [ -n "${INFINIZATION_DISABLE_SANDBOX:-}" ] && envvars+=("INFINIZATION_DISABLE_SANDBOX=$INFINIZATION_DISABLE_SANDBOX")
+  [ -n "${INFINIBAY_CLUSTER_MTLS:-}" ] && envvars+=("INFINIBAY_CLUSTER_MTLS=$INFINIBAY_CLUSTER_MTLS")
+  [ ${#envvars[@]} -gt 0 ] && envfwd=(env "${envvars[@]}")
   # Turn COMPOSE_PROFILES (comma list) into explicit --profile flags. Passing them
   # on the CLI works on both docker compose AND podman-compose, whereas relying on
   # the COMPOSE_PROFILES env var alone is not honored by every provider (and sudo
@@ -501,6 +527,10 @@ build_infiniservice() {
 # Lightweight env setup for a COMPUTE NODE. Unlike ensure_env (master) it pulls in
 # no master compose overlays, runs no setup TUI, and seeds no master identity — a
 # node's runtime config lives in .env.node, written by the join flow below.
+# $1 = "start" when the caller will actually (re)start the node container — only then
+# do we run the heavy privileged setup (host modprobe + /etc registries drop-in).
+# Read-only ops (logs/status/down) still get the compose-file list + ENGINE_SUDO so
+# they target the right (rootful, under --kvm) stack, but skip the modprobe/sudo work.
 prepare_node_env() {
   require docker
   resolve_compose
@@ -508,13 +538,58 @@ prepare_node_env() {
   REPOS_DIR="${REPOS_DIR:-./repos}"
   REPO_REF="${REPO_REF:-main}"
   PORT_BIND="${PORT_BIND:-0.0.0.0}"
+  detect_node_runtime "${1:-}"
 }
 
-# Compose wrapper for the compute-node stack: only docker-compose.node.yml + the
-# generated .env.node. No $ENGINE_SUDO — enrollment and the heartbeat need no host
-# privilege (infinization is built lazily on the first VM verb, never at startup).
+# Compute-node KVM decision. OPT-IN via --kvm (NODE_KVM=on) — unlike the master's
+# auto-detect — because enabling it layers the privileged KVM overlay AND (under
+# rootless podman) routes the node engine through sudo/rootful, which re-namespaces
+# the node's volumes; we don't silently flip an already-rootless node. When on: layer
+# the node KVM overlay so a MIGRATED VM can boot here, default the QEMU sandbox off
+# (rootless-podman SIGSYS), load host bridge modules, and use rootful podman for host
+# bridges/nft/TAP — mirrors the master's detect_runtime.
+detect_node_runtime() {
+  local starting="${1:-}"
+  # Effective KVM choice: the --kvm flag (exported NODE_KVM) wins; else whatever a
+  # prior `join`/`node up --kvm` persisted in .env.node; else off.
+  local kvm="${NODE_KVM:-}"
+  [ -z "$kvm" ] && kvm="$(grep -E '^[[:space:]]*NODE_KVM=' "$NODE_ENV_FILE" 2>/dev/null | head -n1 | cut -d= -f2- || true)"
+  case "$kvm" in
+    on|1|true) ;;
+    *) c "node: heartbeat/enroll only (rootless). Pass --kvm so MIGRATED VMs can boot on this host."; return 0 ;;
+  esac
+  { [ "$(uname -s)" = "Linux" ] && [ -e /dev/kvm ]; } \
+    || die "node --kvm needs /dev/kvm on this host (Linux + hardware virtualization). Omit --kvm to run heartbeat-only."
+  NODE_COMPOSE_FILES+=(-f "$NODE_KVM_COMPOSE_FILE")
+  KVM_ACTIVE=1
+  export INFINIZATION_DISABLE_SANDBOX="${INFINIZATION_DISABLE_SANDBOX:-1}"
+  c "node: KVM ON — migrated VMs can boot here (/dev/kvm present)."
+  if docker --version 2>&1 | grep -qi podman \
+     && [ "$(id -u)" -ne 0 ] \
+     && docker info 2>/dev/null | grep -q "rootless: true"; then
+    command -v sudo >/dev/null 2>&1 \
+      || die "rootless podman + node KVM needs rootful access but 'sudo' is missing. Install sudo, or run as root."
+    ENGINE_SUDO="sudo"
+    # IMPORTANT: rootful podman uses a DIFFERENT volume/image namespace than rootless.
+    # A node first joined WITHOUT --kvm (rootless) has its enrollment cert + node_modules
+    # in the ROOTLESS namespace; enabling --kvm now can't see them → the agent re-enrolls
+    # as a duplicate and re-installs. If you enrolled rootless and now want KVM, tear the
+    # rootless stack down (`./dev.sh node down`) and re-run `./dev.sh join --mtls --kvm`.
+    warn "node --kvm ⇒ rootful podman (sudo). Its volumes are a SEPARATE namespace from a rootless enrollment — if you first joined WITHOUT --kvm, down the node and re-join with --mtls --kvm. You may be prompted for your password."
+    [ "$starting" = start ] && ensure_root_registries
+  fi
+  # modprobe of host bridge modules is only needed when we actually boot QEMU.
+  [ "$starting" = start ] && ensure_host_modules
+}
+
+# Compose wrapper for the compute-node stack (node.yml [+ node.kvm.yml] + .env.node).
+# $ENGINE_SUDO is "" for the heartbeat-only path, "sudo" once --kvm needs rootful
+# podman for VM networking; envfwd carries the sandbox toggle across sudo's env-reset.
 dc_node() {
-  "${COMPOSE_CMD[@]}" --env-file "$NODE_ENV_FILE" -f "$NODE_COMPOSE_FILE" "$@"
+  local envfwd=() envvars=()
+  [ -n "${INFINIZATION_DISABLE_SANDBOX:-}" ] && envvars+=("INFINIZATION_DISABLE_SANDBOX=$INFINIZATION_DISABLE_SANDBOX")
+  [ ${#envvars[@]} -gt 0 ] && envfwd=(env "${envvars[@]}")
+  $ENGINE_SUDO ${envfwd[@]+"${envfwd[@]}"} "${COMPOSE_CMD[@]}" --env-file "$NODE_ENV_FILE" "${NODE_COMPOSE_FILES[@]}" "$@"
 }
 
 # The cluster bootstrap token to OFFER as the default: the one already in the local
@@ -533,7 +608,7 @@ node_default_token() {
 # master URL (arg or prompt), picks the token, runs the SAS-verified enrollment, then
 # starts the heartbeat so the node reports online. See docker-compose.node.yml.
 cmd_join() {
-  local master_url="" node_name="" token="" want_mtls=0 master_cn="" no_start=0
+  local master_url="" node_name="" token="" want_mtls=0 master_cn="" no_start=0 node_kvm=off
   # first non-flag positional is the master URL
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -541,6 +616,7 @@ cmd_join() {
       --token)     token="${2:-}"; shift 2 ;;
       --master-cn) master_cn="${2:-}"; shift 2 ;;
       --mtls)      want_mtls=1; shift ;;
+      --kvm)       node_kvm=on; shift ;;
       --no-start)  no_start=1; shift ;;
       -h|--help)   cmd_join_help; return 0 ;;
       -*)          die "join: unknown flag '$1' (see ./dev.sh join --help)" ;;
@@ -548,7 +624,8 @@ cmd_join() {
     esac
   done
 
-  prepare_node_env
+  export NODE_KVM="$node_kvm"   # detect_node_runtime (via prepare_node_env) reads this
+  prepare_node_env start        # join (re)starts the node container → do the privileged setup
   c "onboarding THIS host as a compute node — cloning backend + infinization…"
   clone_one backend
   clone_one infinization
@@ -621,6 +698,7 @@ cmd_join() {
     echo "MASTER_CLUSTER_URL=$master_cluster_url"
     echo "INFINIBAY_MASTER_CN=$master_cn"
     echo "NODE_ADDRESS=$node_address"
+    echo "NODE_KVM=$node_kvm"
   } > "$NODE_ENV_FILE"
   c "wrote $NODE_ENV_FILE"
 
@@ -675,29 +753,42 @@ Options:
   --name NODE       node name (default: this host's hostname)
   --token TOKEN     cluster bootstrap token (default: prompt, offering the one in
                     .env.docker). Get it on the master: grep INFINIBAY_CLUSTER_TOKEN .env.docker
-  --mtls            heartbeat over full mutual TLS (requires the master to run with
-                    INFINIBAY_CLUSTER_MTLS=1); default is dev token mode
+  --mtls            heartbeat over full mutual TLS. REQUIRED to receive cross-node VM
+                    MIGRATIONS (the disk copy is mTLS-only). Needs the master started
+                    with `./dev.sh up --mtls` (its :4433 ops server). Default: token mode.
   --master-cn CN    master certificate CN for --mtls (default: master)
+  --kvm             give the node /dev/kvm + host networking so a MIGRATED VM can
+                    actually BOOT here (opt-in; layers docker-compose.node.kvm.yml and,
+                    under rootless podman, uses sudo/rootful — re-namespaces volumes).
+                    Requires /dev/kvm and your user in the `kvm` group on this host.
   --no-start        enroll only; don't start the heartbeat
 
 Examples:
   ./dev.sh join                              # prompts for the master IP + token
   ./dev.sh join 192.168.1.50                 # bare IP → http://192.168.1.50:4000
-  ./dev.sh join http://192.168.1.50:4000 --name worker-1 --token s3cr3t
-Manage the node afterwards:  ./dev.sh node logs | status | down | up
+  # Full cross-node migration target (real remote node that runs VMs):
+  ./dev.sh join http://192.168.1.50:4000 --mtls --kvm --name worker-1
+Manage the node afterwards:  ./dev.sh node logs | status | down | up [--kvm]
 EOF
 }
 
 # Manage the compute-node agent started by `join` (thin dc_node passthrough).
+# `node up --kvm` (re)starts it with the KVM overlay so migrated VMs can boot here.
 cmd_node() {
   local sub="${1:-status}"; shift || true
+  local rest=() want_kvm=0
+  for a in "$@"; do case "$a" in --kvm) want_kvm=1 ;; *) rest+=("$a") ;; esac; done
   [ -f "$NODE_ENV_FILE" ] || die "no $NODE_ENV_FILE — run ./dev.sh join first."
-  prepare_node_env
+  # Persist an explicit --kvm so later `node up`/`restart` keep the KVM overlay
+  # (matches how `join` records it) — otherwise a bare `node up` would drop it.
+  if [ "$want_kvm" = 1 ]; then export NODE_KVM=on; upsert_env "$NODE_ENV_FILE" NODE_KVM on; fi
+  local starting=""; case "$sub" in up|restart) starting=start ;; esac
+  prepare_node_env "$starting"
   case "$sub" in
     up)             dc_node up -d --build node-agent ;;
-    down|stop)      dc_node down "$@" ;;
-    logs)           dc_node logs -f "$@" ;;
-    status|ps)      dc_node ps "$@" ;;
+    down|stop)      dc_node down ${rest[@]+"${rest[@]}"} ;;
+    logs)           dc_node logs -f ${rest[@]+"${rest[@]}"} ;;
+    status|ps)      dc_node ps ${rest[@]+"${rest[@]}"} ;;
     restart)        dc_node restart node-agent ;;
     *) die "unknown node subcommand '$sub'. Try: up | down | logs | status | restart" ;;
   esac
@@ -728,6 +819,15 @@ case "$cmd" in
         # emulated compute nodes so you can watch several nodes report online.
         --cluster)    WANT_CLUSTER=1 ;;
         --no-cluster) WANT_CLUSTER=0 ;;
+        # Cluster mTLS. Run the master with its :4433 ops server so REAL remote nodes
+        # (joined with `./dev.sh join --mtls`) can heartbeat, proxy DB-RPC, and receive
+        # cross-node VM migrations over mutual TLS. Cluster-wide all-or-nothing: with
+        # mTLS on, the token ops path is retired (HTTP 421), so token nodes and the
+        # `--cluster` emulation go offline — hence the guard below.
+        --mtls)       WANT_MTLS=1
+                      c "cluster mTLS: ON — master runs its :4433 ops server (real remote mTLS nodes)" ;;
+        --no-mtls)    WANT_MTLS=0
+                      c "cluster mTLS: OFF — token-mode heartbeats" ;;
         # Re-run the Phase A setup TUI even when SETUP_DONE is present (preserves
         # existing secrets), then continue the normal up.
         --reconfigure) WANT_RECONFIGURE=1 ;;
@@ -739,6 +839,12 @@ case "$cmd" in
       esac
     done
     ensure_env   # detect_runtime here picks control-plane vs KVM and sets ENGINE_SUDO
+    # mTLS retires the token ops path (421), so token nodes can't register alongside it.
+    # Evaluated AFTER ensure_env so it sees the EFFECTIVE mtls value (the --mtls flag
+    # OR a value persisted in .env.docker), not just this run's flag.
+    if [ "${INFINIBAY_CLUSTER_MTLS:-}" = 1 ] && [ "${WANT_CLUSTER:-0}" = 1 ]; then
+      die "--mtls and --cluster are mutually exclusive: under cluster mTLS the token heartbeat path returns 421, so the emulated (token-mode) node-1/node-2 cannot register. Use --cluster for same-host token emulation, OR --mtls for real remote mTLS nodes (./dev.sh join --mtls)."
+    fi
     clone_all
     [ "$KVM_ACTIVE" = 1 ] && ensure_host_modules
     # Guest agent: build it once, automatically, when missing — otherwise a fresh

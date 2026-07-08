@@ -1,0 +1,50 @@
+# Infinibay — COMPUTE NODE KVM overlay (LINUX HOSTS ONLY).
+#
+# docker-compose.node.yml runs the node agent so it can enroll, heartbeat, and
+# RECEIVE a migrated disk (the disk server is a pure filesystem router — no KVM).
+# But actually BOOTING a migrated VM on this node needs the same hardware-virt and
+# host-networking grants the master's docker-compose.kvm.yml gives its backend:
+# infinization.initialize() sets up nftables (root + CAP_NET_ADMIN + br_netfilter)
+# and startVM opens /dev/kvm. Without this overlay the disk lands and ownership
+# flips, but the first VM verb fails at inf.initialize().
+#
+# Layered by `./dev.sh join --kvm` / `./dev.sh node up --kvm` (opt-in — enabling it
+# also routes rootless podman through sudo/rootful for host bridges, which
+# re-namespaces the node's volumes). Do NOT use on a host without /dev/kvm.
+#
+# /dev/kvm UNDER ROOTLESS PODMAN needs `keep-groups` (keeps your host `kvm` GID in
+# the container) — REQUIRES your node-host user in the `kvm` group
+# (`sudo usermod -aG kvm $USER` + re-login). See docker-compose.kvm.yml's header note.
+
+name: infinibay-node
+
+services:
+  node-agent:
+    # Full host access: KVM, TAP/TUN, nftables, bridges, NAT.
+    privileged: true
+    # Keep the host user's supplementary groups (esp. kvm) so QEMU can open the
+    # group-rw /dev/kvm under rootless podman.
+    group_add:
+      - keep-groups
+    devices:
+      - "/dev/kvm:/dev/kvm"
+      - "/dev/net/tun:/dev/net/tun"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_ADMIN
+    volumes:
+      # Lets the in-container `modprobe br_netfilter nf_conntrack_bridge` see the
+      # host-loaded modules and no-op succeed (./dev.sh loads them on the host).
+      - /lib/modules:/lib/modules:ro
+    environment:
+      # This node runs QEMU inside a rootless-podman container whose substrate
+      # seccomp kills a sandboxed device-init syscall with SIGSYS — default the QEMU
+      # sandbox OFF so migrated VMs boot (dev.sh forwards this across sudo). NOT for
+      # production; set INFINIZATION_DISABLE_SANDBOX=0 on a substrate where it works.
+      INFINIZATION_DISABLE_SANDBOX: ${INFINIZATION_DISABLE_SANDBOX:-1}
+      # A VM booted on THIS node advertises these for its console (SPICE/VNC relay)
+      # and in-guest asset fetch — point them at the node's own LAN address (join
+      # writes NODE_ADDRESS into .env.node) so they're reachable, not localhost.
+      APP_HOST: ${NODE_ADDRESS:-127.0.0.1}
+      GRAPHIC_HOST: ${NODE_ADDRESS:-127.0.0.1}

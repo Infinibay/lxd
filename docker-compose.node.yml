@@ -66,7 +66,10 @@ services:
       # infinization storage roots (used only once the node actually hosts a VM).
       INFINIBAY_BASE_DIR: /opt/infinibay
       INFINIZATION_SOCKET_DIR: /opt/infinibay/sockets
-      INFINIZATION_DISK_DIR: /opt/infinibay/disks
+      # MUST equal the master's INFINIZATION_DISK_DIR (docker-compose.yml) — cross-node
+      # migration pushes the disk's absolute path verbatim and LocalDiskStore rejects
+      # anything outside this dir. Overridable, but then set the SAME value on both.
+      INFINIZATION_DISK_DIR: ${INFINIZATION_DISK_DIR:-/opt/infinibay/disks}
       INFINIZATION_PID_DIR: /opt/infinibay/pids
       # prisma generate reads the schema (no connection); a placeholder keeps it quiet.
       DATABASE_URL: ${DATABASE_URL:-postgresql://unused:unused@127.0.0.1:5432/unused?schema=public}
