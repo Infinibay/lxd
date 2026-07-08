@@ -130,7 +130,7 @@ whenever you want to bring it up.
   actually hosting/creating VMs on a remote node is still WIP (a later multi-node
   phase). Use this to exercise onboarding today, not yet to run guests on the node.
 
-Current dev-stack version: **v0.5.0** (tracked in `VERSION`).
+Current dev-stack version: **v0.5.1** (tracked in `VERSION`).
 
 ---
 
@@ -266,4 +266,4 @@ lxd/
 
 ---
 
-**Last updated:** 2026-07-08 · dev-stack `VERSION` 0.5.0
+**Last updated:** 2026-07-08 · dev-stack `VERSION` 0.5.1

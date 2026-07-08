@@ -312,9 +312,15 @@ stop_mdns() {
 discover_master() {
   command -v avahi-browse >/dev/null 2>&1 || return 0
   local line host port
-  line="$(avahi-browse -tprk _infinibay-master._tcp 2>/dev/null | awk -F';' '$1=="=" {print $8";"$9; exit}')"
+  line="$(avahi-browse -tprk _infinibay-master._tcp 2>/dev/null | awk -F';' '$1=="=" {print $8";"$9; exit}')" || true
   host="${line%%;*}"; port="${line##*;}"
-  [ -n "$host" ] && [ -n "$port" ] && printf 'http://%s:%s' "$host" "$port"
+  if [ -n "$host" ] && [ -n "$port" ]; then
+    printf 'http://%s:%s' "$host" "$port"
+  fi
+  # MUST return 0: the caller assigns this as `url="$(discover_master)"`, and under
+  # `set -e` a non-zero return there kills the whole script silently (before the
+  # "no master found" guard) — a false `&&` chain as the last statement would do that.
+  return 0
 }
 
 # Ensure a key exists in $ENV_FILE; append "KEY=default" (with an optional
@@ -568,8 +574,10 @@ dc_node() {
 # (It only works if the master kept that same token — otherwise paste the master's.)
 node_default_token() {
   local t=""
-  t="$(grep -E '^[[:space:]]*INFINIBAY_CLUSTER_TOKEN=' "$ENV_FILE"    2>/dev/null | head -n1 | cut -d= -f2-)"
-  [ -z "$t" ] && t="$(grep -E '^[[:space:]]*INFINIBAY_CLUSTER_TOKEN=' "$ENV_EXAMPLE" 2>/dev/null | head -n1 | cut -d= -f2-)"
+  # `|| true`: under set -o pipefail, `grep|head` returns non-zero on no-match OR when
+  # head closes the pipe early (grep SIGPIPE) — either would abort the script via set -e.
+  t="$(grep -E '^[[:space:]]*INFINIBAY_CLUSTER_TOKEN=' "$ENV_FILE"    2>/dev/null | head -n1 | cut -d= -f2- || true)"
+  [ -n "$t" ] || t="$(grep -E '^[[:space:]]*INFINIBAY_CLUSTER_TOKEN=' "$ENV_EXAMPLE" 2>/dev/null | head -n1 | cut -d= -f2- || true)"
   printf '%s' "$t"
 }
 
@@ -602,15 +610,15 @@ cmd_join() {
   local discovered=0
   if [ -z "$master_url" ] || [ "$master_url" = "auto" ]; then
     c "discovering an Infinibay master on the LAN via mDNS…"
-    master_url="$(discover_master)"
-    [ -n "$master_url" ] || die "no master found via mDNS. Pass it explicitly: ./dev.sh join http://<master-ip>:4000  (and 'sudo apt-get install -y avahi-utils' on both hosts for auto-discovery)"
+    master_url="$(discover_master || true)"
+    [ -n "$master_url" ] || die "no master found via mDNS. Pass it explicitly: ./dev.sh join http://<master-ip>:4000  (auto-discovery also needs 'sudo apt-get install -y avahi-utils' on BOTH hosts, and the master must have been started with ./dev.sh up so it advertises)"
     discovered=1
     c "found master: ${master_url}"
     if [ "$assume_yes" != 1 ]; then
       # mDNS is UNAUTHENTICATED — anyone on the LAN can advertise. The token is sent
       # BEFORE the SAS check, so confirm this is really the master first.
       warn "this master was found via mDNS, which is NOT authenticated — anyone on the LAN can advertise it, and your token is sent to it BEFORE the pairing-code check."
-      read -r -p "$(printf '\033[1;36m[dev]\033[0m Is %s your master? Send it the bootstrap token? [y/N] ' "$master_url")" _ok
+      read -r -p "$(printf '\033[1;36m[dev]\033[0m Is %s your master? Send it the bootstrap token? [y/N] ' "$master_url")" _ok || true
       case "$_ok" in y|Y|yes) ;; *) die "aborted. Pass the URL explicitly to skip discovery: ./dev.sh join http://<master-ip>:4000" ;; esac
     fi
   fi
@@ -623,10 +631,10 @@ cmd_join() {
     local def; def="$(node_default_token)"
     if [ -t 0 ]; then
       if [ -n "$def" ]; then
-        read -r -p "$(printf '\033[1;36m[dev]\033[0m Cluster token [Enter = use %s from %s]: ' "$def" "$ENV_FILE")" token
+        read -r -p "$(printf '\033[1;36m[dev]\033[0m Cluster token [Enter = use %s from %s]: ' "$def" "$ENV_FILE")" token || true
         [ -n "$token" ] || token="$def"
       else
-        read -r -p "$(printf '\033[1;36m[dev]\033[0m Paste the master'\''s cluster token: ')" token
+        read -r -p "$(printf '\033[1;36m[dev]\033[0m Paste the master'\''s cluster token: ')" token || true
       fi
     else
       token="$def"
