@@ -7,12 +7,14 @@
 #
 # `./dev.sh join` writes the collected values into .env.node and runs, in order:
 #   1. enrollment (interactive, prints the SAS pairing code):
-#        compose run --rm node-agent npm run agent:join
+#        compose run --rm node-agent node -r ts-node/register -r tsconfig-paths/register agent/join.ts
 #   2. heartbeat (long-running, keeps the node 'online' in the master UI):
 #        compose up -d node-agent
+# (The agents run via `node -r ts-node/register`, NOT the node_modules/.bin/ts-node
+# shim — rootless podman may refuse to exec that shim from the volume.)
 #
-# The entrypoint (docker/entrypoint-node-agent.sh) prepares deps and — for the
-# heartbeat path only — builds infinization; there is NO postgres/migrate/seed
+# The entrypoint (docker/entrypoint-node-agent.sh) prepares deps (installs + builds
+# infinization, then installs the backend); there is NO postgres/migrate/seed
 # because a compute node holds no DB (its DB calls are proxied to the master).
 #
 # The agent's mTLS identity (node-key/node-cert/cluster-ca.pem) written by the join
@@ -84,7 +86,12 @@ services:
       - node_infinization_dist:/workspace/infinization/dist
       - node_infinibay_base:/opt/infinibay
     entrypoint: ["bash", "/workspace/scripts/entrypoint-node-agent.sh"]
-    command: ["npm", "run", "agent:heartbeat"]
+    # Invoke via the image's `node` + ts-node as a REQUIRE hook, NOT the
+    # node_modules/.bin/ts-node shim. Under rootless podman the .bin script in the
+    # named node_modules volume can end up non-executable (sh: ts-node: Permission
+    # denied), whereas `node` ships in the image and only READS ts-node from the
+    # volume. Equivalent to the `agent:heartbeat` npm script (ts-node -r tsconfig-paths/register).
+    command: ["node", "-r", "ts-node/register", "-r", "tsconfig-paths/register", "agent/heartbeat-agent.ts"]
 
 volumes:
   node_backend_node_modules:

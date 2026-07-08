@@ -15,7 +15,10 @@
 #
 # Idempotent: the node_modules / dist volumes persist, so every step is a no-op on
 # later runs. Used by docker-compose.node.yml as the `entrypoint` (CMD is the agent
-# command, overridden to `npm run agent:join` for the enrollment run).
+# command; the enrollment run overrides it with `node -r ts-node/register …
+# agent/join.ts`). The agents are invoked via `node -r ts-node/register` rather than
+# the node_modules/.bin/ts-node shim, which rootless podman may refuse to exec from
+# the volume — so what the run actually needs is ts-node RESOLVABLE, not executable.
 set -uo pipefail
 
 log()  { echo -e "\033[1;35m[node-agent]\033[0m $*"; }
@@ -44,9 +47,15 @@ else
 fi
 
 # ── 2. backend deps (ts-node + node-forge for join; everything for heartbeat) ─
+# Gate on what the agent invocation actually needs: not just that the .bin/ts-node
+# symlink exists, but that `node -r ts-node/register -r tsconfig-paths/register` can
+# RESOLVE both hooks. So an aborted/partial install that kept the symlink but lost a
+# module still re-installs here (self-heals) instead of failing later with
+# `Cannot find module`.
 cd "$BE"
-if [ ! -e node_modules/.bin/ts-node ]; then
-  log "installing backend deps (first run / repairing partial install — a few minutes)…"
+if [ ! -e node_modules/.bin/ts-node ] \
+   || ! node -e 'require.resolve("ts-node/register"); require.resolve("tsconfig-paths/register")' 2>/dev/null; then
+  log "installing backend deps (first run / repairing incomplete install — a few minutes)…"
   npm install $NPM_AGE_FLAG --no-audit --no-fund || warn "backend npm install reported errors"
 fi
 

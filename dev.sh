@@ -635,7 +635,10 @@ cmd_join() {
   warn "node in the master's Infrastructure UI, then APPROVE it there. If the codes"
   warn "differ, the connection may be tampered with — do NOT approve."
   echo ""
-  if ! dc_node run --rm node-agent npm run agent:join; then
+  # Invoke via `node` + ts-node as a require hook (NOT node_modules/.bin/ts-node,
+  # which rootless podman may refuse to exec from the volume). Same as `npm run
+  # agent:join` (ts-node -r tsconfig-paths/register agent/join.ts).
+  if ! dc_node run --rm node-agent node -r ts-node/register -r tsconfig-paths/register agent/join.ts; then
     die "enrollment failed. Check the master URL/token, that the master is reachable, and that it has INFINIBAY_CLUSTER_TOKEN set."
   fi
 
