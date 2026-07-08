@@ -2,14 +2,16 @@
 # Compute-node agent dev entrypoint (multi-node). Prepares just enough to run the
 # node agent, then `exec`s the command handed in as "$@" (join enrollment OR the
 # heartbeat/verb server). This is the NODE counterpart of entrypoint-backend.sh
-# and deliberately does LESS:
+# and deliberately does LESS: NO postgres wait / migrate / seed — a compute node
+# holds no DB connection (its DB reads/writes are proxied to the master over RPC).
 #
-#   • NO postgres wait / migrate / seed — a compute node holds no DB connection.
-#     Its DB reads/writes are proxied to the master over RPC (RpcDatabaseAdapter),
-#     so there is nothing local to migrate.
-#   • infinization is built ONLY for the heartbeat/verb path. `agent:join` is pure
-#     enrollment (keypair + CSR + SAS pairing) and imports neither infinization nor
-#     a DB, so we skip the slow tsc build for it and the pairing code prints fast.
+# ORDER MATTERS: infinization is built BEFORE the backend install. The backend
+# declares "@infinibay/infinization": "file:../infinization", and infinization has
+# a `prepare` script (`npm run build` → tsc). npm runs that prepare while installing
+# the backend's file: dependency, so tsc must already exist in infinization's own
+# node_modules — otherwise the backend `npm install` dies with `tsc: not found`
+# (exit 127) and ts-node never lands, so even `agent:join` (which imports neither
+# infinization nor a DB) cannot start. Mirrors entrypoint-backend.sh steps 1–2.
 #
 # Idempotent: the node_modules / dist volumes persist, so every step is a no-op on
 # later runs. Used by docker-compose.node.yml as the `entrypoint` (CMD is the agent
@@ -23,42 +25,39 @@ INFZ=/workspace/infinization
 BE=/workspace/backend
 NPM_AGE_FLAG="--minimum-release-age=0" # sanctioned dev override of the .npmrc guardrail
 
-# infinization + a generated Prisma client are needed only by the heartbeat/verb
-# path. The join run (agent:join) needs neither — keep its startup snappy so the
-# SAS pairing code appears without a multi-minute tsc build first.
-NEED_RUNTIME=1
-case "$*" in *agent:join*) NEED_RUNTIME=0 ;; esac
+# ── 1. infinization sibling (built FIRST — see ORDER MATTERS above) ───────────
+# Idempotency checks look for the BINARY each step produces, not just a non-empty
+# node_modules — so a previously ABORTED install (which leaves a partial dir) still
+# re-runs and self-heals on the next `./dev.sh join`, instead of being skipped.
+if [ -d "$INFZ" ]; then
+  cd "$INFZ"
+  if [ ! -e node_modules/.bin/tsc ]; then
+    log "installing infinization deps (first run / repairing partial install)…"
+    npm install $NPM_AGE_FLAG --no-audit --no-fund || warn "infinization npm install reported errors"
+  fi
+  if [ ! -f dist/index.js ]; then
+    log "building infinization (tsc && tsc-alias)…"
+    npm run build || warn "infinization build reported errors"
+  fi
+else
+  warn "infinization not found at $INFZ — the backend install and verb server will fail. Re-run ./dev.sh join after it is cloned."
+fi
 
-# ── backend deps (ts-node + node-forge for join; everything for heartbeat) ───
+# ── 2. backend deps (ts-node + node-forge for join; everything for heartbeat) ─
 cd "$BE"
-if [ -z "$(ls -A node_modules 2>/dev/null)" ]; then
-  log "installing backend deps (first run — a few minutes)…"
+if [ ! -e node_modules/.bin/ts-node ]; then
+  log "installing backend deps (first run / repairing partial install — a few minutes)…"
   npm install $NPM_AGE_FLAG --no-audit --no-fund || warn "backend npm install reported errors"
 fi
 
-if [ "$NEED_RUNTIME" = 1 ]; then
-  # ── infinization sibling (file: dep, imported as COMPILED dist by the agent) ─
-  if [ -d "$INFZ" ]; then
-    cd "$INFZ"
-    if [ -z "$(ls -A node_modules 2>/dev/null)" ]; then
-      log "installing infinization deps…"
-      npm install $NPM_AGE_FLAG --no-audit --no-fund || warn "infinization npm install reported errors"
-    fi
-    if [ ! -f dist/index.js ]; then
-      log "building infinization (tsc && tsc-alias)…"
-      npm run build || warn "infinization build reported errors"
-    fi
-  else
-    warn "infinization not found at $INFZ — the verb server will fail. Re-run ./dev.sh join after it is cloned."
-  fi
-  # The agent transitively imports @prisma/client; generate it from the schema
-  # (no DB connection needed) so the import resolves. Never migrate/seed here.
-  cd "$BE"
-  log "prisma generate (client only — no DB connection)…"
-  npx prisma generate >/tmp/prisma-gen.log 2>&1 || warn "prisma generate reported errors (see /tmp/prisma-gen.log)"
-  # infinization storage roots + the cert dir join wrote its identity into.
-  mkdir -p /opt/infinibay/{sockets,disks,pids,certs} 2>/dev/null || true
-fi
+# The heartbeat/verb path transitively imports @prisma/client; generate it from the
+# schema (no DB connection needed) so the import resolves. Harmless for join. Never
+# migrate/seed here — the node has no DB.
+log "prisma generate (client only — no DB connection)…"
+npx prisma generate >/tmp/prisma-gen.log 2>&1 || warn "prisma generate reported errors (see /tmp/prisma-gen.log)"
+
+# infinization storage roots + the cert dir join writes its identity into.
+mkdir -p /opt/infinibay/{sockets,disks,pids,certs} 2>/dev/null || true
 
 cd "$BE"
 log "starting: $*"
