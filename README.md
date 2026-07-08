@@ -24,7 +24,7 @@ the app repos into `./repos/`, bind-mounts them into the containers, and reloads
 save — edit code, the stack picks it up live.
 
 ```bash
-./dev.sh up                  # clone repos + build images + start (live logs)
+./dev.sh up                  # clone repos + build images + start as the cluster MASTER (live logs)
 ./dev.sh up -d               # detached
 ./dev.sh up --cluster        # + emulate compute nodes (node-1/node-2) on this host
 ./dev.sh down [-v]           # stop (-v also drops volumes: db, node_modules, …)
@@ -32,6 +32,10 @@ save — edit code, the stack picks it up live.
 ./dev.sh pull                # fast-forward every repo to origin/main (keeps local edits)
 ./dev.sh build-infiniservice # cross-compile the in-guest agent (see note below)
 ./dev.sh status | restart | clean
+
+# Multi-node — run ON A SECOND physical host to add it as a compute node:
+./dev.sh join [master-url]   # discover/confirm the master, SAS pairing, start the node agent
+./dev.sh node up|down|logs|status|restart   # manage that node agent afterwards
 ```
 
 `make up`, `make down`, `make logs S=backend`, … wrap the same commands. First `up`
@@ -60,10 +64,73 @@ Once up:
 - **`up` clones missing repos but does NOT update existing checkouts** — use
   `./dev.sh pull` to advance them to `origin/main` (it skips any repo with
   uncommitted changes, so it never clobbers your edits).
-- **Multi-node:** `--cluster` adds `node-1`/`node-2` compute-agent heartbeats so the
-  master reports several nodes online, all on one host.
+- **Multi-node:** this stack always comes up as the cluster **master** and advertises
+  itself on the LAN (mDNS). `--cluster` adds emulated `node-1`/`node-2` heartbeats on
+  this same host; to add a **real second host**, run `./dev.sh join` there — see below.
 
-Current dev-stack version: **v0.4.0** (tracked in `VERSION`).
+### Multi-node: run a master + add real compute nodes
+
+The dev stack can span **more than one physical host**: one master plus N compute
+nodes, each onboarded with a SAS-verified pairing (the same ceremony as the LXD
+`./run.sh join`, wrapped for Docker/Podman).
+
+**1 — The master.** Nothing extra: `./dev.sh up` on this host already **is** the
+master. It seeds a cluster bootstrap token into `.env.docker` and advertises
+`_infinibay-master._tcp` on the LAN so nodes can discover it.
+
+**2 — Get the cluster token** (the node needs it — it's a shared secret you choose,
+not something issued). On the **master**:
+
+```bash
+grep INFINIBAY_CLUSTER_TOKEN .env.docker        # dev default: dev-insecure-cluster-token
+```
+
+For a real cross-host cluster, rotate it to a strong value and reload the master:
+
+```bash
+NEW=$(openssl rand -hex 32)
+sed -i "s/^INFINIBAY_CLUSTER_TOKEN=.*/INFINIBAY_CLUSTER_TOKEN=$NEW/" .env.docker
+./dev.sh up -d                                  # recreate the backend so it picks up $NEW
+```
+
+**3 — Join, on the SECOND host.** Clone this repo there and run `join`:
+
+```bash
+git clone https://github.com/Infinibay/lxd && cd lxd
+./dev.sh join                                   # auto-discover the master, then prompt
+#   explicit master:   ./dev.sh join http://<master-ip>:4000
+#   non-interactive:   ./dev.sh join http://<master-ip>:4000 --name worker-1 --token <token>
+```
+
+`join` clones `backend` + `infinization`, discovers/confirms the master, offers the
+token from `.env.docker` (paste the master's if it differs), then prints a **6-digit
+pairing code**. Approve it in the master UI (**Infrastructure**) — the codes must
+match. On approval it starts the node agent and the node reports **online**.
+
+**4 — Run / manage the node** after joining (config is saved in `.env.node`):
+
+```bash
+./dev.sh node up          # start (levantar) the node agent
+./dev.sh node logs        # follow its logs
+./dev.sh node status      # ps
+./dev.sh node down        # stop it
+```
+
+Use `./dev.sh join --no-start` to enrol **without** starting, then `./dev.sh node up`
+whenever you want to bring it up.
+
+**Notes**
+- **Auto-discovery needs Avahi** on both hosts (`sudo apt-get install -y avahi-utils`).
+  Without it, `join` still works — just pass the master URL explicitly.
+- **Heartbeat auth** defaults to **token mode** (works against a default dev master).
+  `./dev.sh join --mtls` upgrades to full mutual TLS, which requires the master to run
+  with `INFINIBAY_CLUSTER_MTLS=1` (its `:4433` ops server) and its node name as the
+  cert CN (`--master-cn`, default `master`).
+- **Current state (v0.5.0):** a joined node **enrols and reports online**; the master
+  actually hosting/creating VMs on a remote node is still WIP (a later multi-node
+  phase). Use this to exercise onboarding today, not yet to run guests on the node.
+
+Current dev-stack version: **v0.5.0** (tracked in `VERSION`).
 
 ---
 
@@ -140,8 +207,8 @@ provisioned, and prints the URLs. Safe to re-run — it skips completed steps.
 compute node** of an existing master: a SAS-verified mTLS enrollment that prints a
 6-digit pairing code to approve in the master UI, with optional mDNS discovery of the
 master (`<master-url> = auto`). This is application-level Infinibay clustering — not
-LXD's own cluster feature. (The dev stack emulates the same topology on one host via
-`./dev.sh up --cluster`.)
+LXD's own cluster feature. (The Docker dev stack offers the same onboarding via
+`./dev.sh join`, and emulates several nodes on one host via `./dev.sh up --cluster`.)
 
 ---
 
@@ -174,8 +241,9 @@ lxd/
 ├── dev.sh                      # 🐳 Docker/Podman dev stack entrypoint
 ├── docker-compose.yml          #    base dev stack
 ├── docker-compose.kvm.yml      #    Linux KVM override (/dev/kvm, keep-groups, NET_ADMIN)
-├── docker-compose.cluster.yml  #    multi-node emulation (node-1/node-2)
-├── docker/                     #    entrypoints + dev-stack README
+├── docker-compose.cluster.yml  #    multi-node emulation (node-1/node-2, same host)
+├── docker-compose.node.yml     #    real cross-host compute node (./dev.sh join)
+├── docker/                     #    entrypoints (incl. entrypoint-node-agent.sh) + dev README
 ├── Makefile                    #    thin wrapper over dev.sh
 ├── repos/                      #    app repos (cloned by dev.sh, bind-mounted)
 │
@@ -198,4 +266,4 @@ lxd/
 
 ---
 
-**Last updated:** 2026-07-06 · dev-stack `VERSION` 0.4.0
+**Last updated:** 2026-07-08 · dev-stack `VERSION` 0.5.0
