@@ -1,0 +1,93 @@
+# Infinibay — COMPUTE NODE stack (real cross-host multi-node).
+#
+# Unlike docker-compose.cluster.yml (which emulates node-1/node-2 on the SAME host
+# as the master, pointed at the in-compose `backend:4000`), this file runs ONE
+# compute-node agent on a SEPARATE physical host, pointed at a REMOTE master over
+# the LAN. It is driven by `./dev.sh join` — you do not normally invoke it directly.
+#
+# `./dev.sh join` writes the collected values into .env.node and runs, in order:
+#   1. enrollment (interactive, prints the SAS pairing code):
+#        compose run --rm node-agent npm run agent:join
+#   2. heartbeat (long-running, keeps the node 'online' in the master UI):
+#        compose up -d node-agent
+#
+# The entrypoint (docker/entrypoint-node-agent.sh) prepares deps and — for the
+# heartbeat path only — builds infinization; there is NO postgres/migrate/seed
+# because a compute node holds no DB (its DB calls are proxied to the master).
+#
+# The agent's mTLS identity (node-key/node-cert/cluster-ca.pem) written by the join
+# lives under /opt/infinibay/certs inside the node_infinibay_base volume, so the
+# later heartbeat run reuses it. Heartbeat defaults to TOKEN mode
+# (INFINIBAY_CLUSTER_MTLS=0) so the node registers over the master's :4000 without
+# needing the master's :4433 ops server; `./dev.sh join --mtls` flips it to full
+# mutual TLS (requires the master to run with INFINIBAY_CLUSTER_MTLS=1).
+
+name: infinibay-node
+
+x-npm-age: &npm-age "0" # neutralise .npmrc minimum-release-age for dev installs
+
+services:
+  node-agent:
+    # Same image the master's backend service builds — the agent scripts live in
+    # the backend repo (agent/join.ts, agent/heartbeat-agent.ts).
+    build:
+      context: ${REPOS_DIR:-./repos}/backend
+      target: dev
+    image: infinibay/dev-backend
+    restart: unless-stopped
+    init: true
+    working_dir: /workspace/backend
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      # ── who + where ────────────────────────────────────────────────────────
+      MASTER_URL: ${MASTER_URL:?run ./dev.sh join (sets MASTER_URL in .env.node)}
+      INFINIBAY_NODE_NAME: ${INFINIBAY_NODE_NAME:?run ./dev.sh join (sets INFINIBAY_NODE_NAME)}
+      INFINIBAY_NODE_ROLE: compute
+      NODE_ADDRESS: ${NODE_ADDRESS:-}
+      AGENT_VERSION: ${AGENT_VERSION:-0.0.0-dev}
+      HEARTBEAT_INTERVAL_MS: ${HEARTBEAT_INTERVAL_MS:-10000}
+      # ── auth ───────────────────────────────────────────────────────────────
+      # Shared bootstrap token: gates the enrollment request AND the token-mode
+      # heartbeat channel. Must match the master's INFINIBAY_CLUSTER_TOKEN.
+      INFINIBAY_CLUSTER_TOKEN: ${INFINIBAY_CLUSTER_TOKEN:?run ./dev.sh join (sets INFINIBAY_CLUSTER_TOKEN)}
+      # mTLS opt-in. 0 (default) → heartbeat over the token channel on MASTER_URL.
+      # 1 → present the join-issued client cert on the master's :4433 ops channel;
+      # then MASTER_CLUSTER_URL + INFINIBAY_MASTER_CN are required (set by --mtls).
+      INFINIBAY_CLUSTER_MTLS: ${INFINIBAY_CLUSTER_MTLS:-0}
+      MASTER_CLUSTER_URL: ${MASTER_CLUSTER_URL:-}
+      INFINIBAY_MASTER_CN: ${INFINIBAY_MASTER_CN:-}
+      # Enrollment (join) + heartbeat share this dir; it lives in node_infinibay_base
+      # so the cert issued during join survives into the heartbeat run.
+      INFINIBAY_CERT_DIR: /opt/infinibay/certs
+      # ── verb server (master → node VM dispatch; lazily built on first verb) ──
+      INFINIBAY_AGENT_PORT: ${INFINIBAY_AGENT_PORT:-9443}
+      # infinization storage roots (used only once the node actually hosts a VM).
+      INFINIBAY_BASE_DIR: /opt/infinibay
+      INFINIZATION_SOCKET_DIR: /opt/infinibay/sockets
+      INFINIZATION_DISK_DIR: /opt/infinibay/disks
+      INFINIZATION_PID_DIR: /opt/infinibay/pids
+      # prisma generate reads the schema (no connection); a placeholder keeps it quiet.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://unused:unused@127.0.0.1:5432/unused?schema=public}
+      NPM_CONFIG_MINIMUM_RELEASE_AGE: *npm-age
+    ports:
+      # Publish the verb server so the master can reach it for VM dispatch. PORT_BIND
+      # pins the host interface (0.0.0.0 by default).
+      - "${PORT_BIND:-0.0.0.0}:${INFINIBAY_AGENT_PORT:-9443}:9443"
+    volumes:
+      - ${REPOS_DIR:-./repos}/backend:/workspace/backend
+      - ${REPOS_DIR:-./repos}/infinization:/workspace/infinization
+      - ./docker:/workspace/scripts:ro
+      # Node-local named volumes (own namespace so they never collide with a master
+      # stack that might also run on this host during development).
+      - node_backend_node_modules:/workspace/backend/node_modules
+      - node_infinization_node_modules:/workspace/infinization/node_modules
+      - node_infinization_dist:/workspace/infinization/dist
+      - node_infinibay_base:/opt/infinibay
+    entrypoint: ["bash", "/workspace/scripts/entrypoint-node-agent.sh"]
+    command: ["npm", "run", "agent:heartbeat"]
+
+volumes:
+  node_backend_node_modules:
+  node_infinization_node_modules:
+  node_infinization_dist:
+  node_infinibay_base:

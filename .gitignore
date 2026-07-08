@@ -19,3 +19,7 @@ profiles/generated/
 
 # local multi-node KVM test harness (copies dev secrets — never commit)
 .env.livetest
+
+# `./dev.sh join` compute-node runtime config + mDNS advertiser pidfile
+.env.node
+.infinibay-mdns.pid
