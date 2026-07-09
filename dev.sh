@@ -576,10 +576,13 @@ detect_node_runtime() {
     # as a duplicate and re-installs. If you enrolled rootless and now want KVM, tear the
     # rootless stack down (`./dev.sh node down`) and re-run `./dev.sh join --kvm`.
     warn "node --kvm ⇒ rootful podman (sudo). Its volumes are a SEPARATE namespace from a rootless enrollment — if you first joined WITHOUT --kvm, down the node and re-join with --kvm. You may be prompted for your password."
-    [ "$starting" = start ] && ensure_root_registries
+    if [ "$starting" = start ]; then ensure_root_registries; fi
   fi
   # modprobe of host bridge modules is only needed when we actually boot QEMU.
-  [ "$starting" = start ] && ensure_host_modules
+  # NB: use `if`, not `[ … ] && cmd` — as the function's LAST command the &&-list
+  # would return 1 when starting≠start and, under `set -e`, silently kill the
+  # caller (node status/down/logs printed nothing — the bug this fixes).
+  if [ "$starting" = start ]; then ensure_host_modules; fi
 }
 
 # Compose wrapper for the compute-node stack (node.yml [+ node.kvm.yml] + .env.node).
