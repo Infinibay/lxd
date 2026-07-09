@@ -985,7 +985,17 @@ case "$cmd" in
   logs)    ensure_env; dc logs -f "$@" ;;
   status|ps) ensure_env; dc ps "$@" ;;
   restart) ensure_env; dc restart "$@" ;;
-  pull)    ensure_env; pull_all ;;
+  # `pull` is a pure git fast-forward of ./repos/* — it must NOT run the master
+  # first-run setup. On a compute node (only .env.node, no SETUP_DONE marker)
+  # ensure_env would launch the Phase A setup TUI and scribble master-only keys
+  # into .env.docker. Source the env file only if it already exists, purely to
+  # honour a customized REPOS_DIR/REPO_REF; otherwise fall back to the defaults.
+  pull)
+    if [ -f "./$ENV_FILE" ]; then set -a; . "./$ENV_FILE"; set +a; fi
+    REPOS_DIR="${REPOS_DIR:-./repos}"
+    REPO_REF="${REPO_REF:-main}"
+    pull_all
+    ;;
   build-infiniservice)
     ensure_env; build_infiniservice
     ;;
