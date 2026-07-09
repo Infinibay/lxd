@@ -835,8 +835,24 @@ Manage the node afterwards:  ./dev.sh node logs | status | down | up [--kvm]
 EOF
 }
 
-# Manage the compute-node agent started by `join` (thin dc_node passthrough).
-# `node up --kvm` (re)starts it with the KVM overlay so migrated VMs can boot here.
+# Resolve the node-agent container name in the ACTIVE engine namespace (honours
+# $ENGINE_SUDO — rootless and rootful podman keep separate container namespaces).
+# Empty if it isn't created yet. `-a` so a crashed/exited agent is still found.
+node_agent_container() {
+  $ENGINE_SUDO docker ps -a --filter name=node-agent --format '{{.Names}}' 2>/dev/null | head -n1
+}
+
+# Manage the compute-node agent started by `join`.
+#
+# `up`/`down` go through podman-compose (they need the full compose model + a
+# populated .env.node). But the READ/observe verbs — logs, status, restart —
+# talk to the engine DIRECTLY on the resolved container instead of via
+# podman-compose. podman-compose 1.2.0's `logs`/`ps` (no service arg) print
+# nothing here, and it hard-crashes at parse time on the compose file's
+# `${MASTER_URL:?…}` guards whenever .env.node is even slightly incomplete —
+# so a passthrough would leave the operator staring at a blank console (the bug
+# this replaces). Direct `docker logs/ps/restart` always shows content and needs
+# no compose-file parse. `node up --kvm` still (re)starts with the KVM overlay.
 cmd_node() {
   local sub="${1:-status}"; shift || true
   local rest=() want_kvm=0
@@ -847,12 +863,33 @@ cmd_node() {
   if [ "$want_kvm" = 1 ]; then export NODE_KVM=on; upsert_env "$NODE_ENV_FILE" NODE_KVM on; fi
   local starting=""; case "$sub" in up|restart) starting=start ;; esac
   prepare_node_env "$starting"
+
+  local cid; cid="$(node_agent_container)"
+  local ns; ns="$([ -n "$ENGINE_SUDO" ] && echo rootful || echo rootless)"
+  local hint="start it with: ./dev.sh node up${KVM_ACTIVE:+ --kvm}"
+
   case "$sub" in
     up)             dc_node up -d --build node-agent ;;
     down|stop)      dc_node down ${rest[@]+"${rest[@]}"} ;;
-    logs)           dc_node logs -f ${rest[@]+"${rest[@]}"} ;;
-    status|ps)      dc_node ps ${rest[@]+"${rest[@]}"} ;;
-    restart)        dc_node restart node-agent ;;
+    restart)
+      [ -n "$cid" ] || die "no node-agent container in the $ns engine namespace — $hint"
+      c "restarting $cid…"
+      $ENGINE_SUDO docker restart "$cid" && $ENGINE_SUDO docker ps --filter name=node-agent
+      ;;
+    logs)
+      [ -n "$cid" ] || die "no node-agent container in the $ns engine namespace — $hint"
+      c "streaming logs for $cid (Ctrl-C to stop)…"
+      # rest passes extra flags (e.g. --tail 200); default follows the live tail.
+      $ENGINE_SUDO docker logs -f ${rest[@]+"${rest[@]}"} "$cid"
+      ;;
+    status|ps)
+      if [ -n "$cid" ]; then
+        $ENGINE_SUDO docker ps -a --filter name=node-agent
+      else
+        warn "no node-agent container in the $ns engine namespace."
+        c "$hint"
+      fi
+      ;;
     *) die "unknown node subcommand '$sub'. Try: up | down | logs | status | restart" ;;
   esac
 }
