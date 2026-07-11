@@ -167,7 +167,7 @@ to the node's agent. Notes:
   old ephemeral path and are lost on the container recreate** that applies the change —
   recreate them so new disks land in the volume (persistent + migratable).
 
-Current dev-stack version: **v0.6.5** (tracked in `VERSION`).
+Current dev-stack version: **v0.6.6** (tracked in `VERSION`).
 
 ---
 

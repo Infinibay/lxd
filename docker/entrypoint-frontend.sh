@@ -33,4 +33,36 @@ if [ -z "$(ls -A node_modules 2>/dev/null)" ]; then
 fi
 
 log "starting next dev (HMR) on :3000 → backend at ${NEXT_PUBLIC_BACKEND_HOST:-http://localhost:4000} …"
-exec npm run dev
+
+# Pre-warm the entry routes so the user's FIRST browser load isn't racing a cold
+# compile. `next dev --webpack` compiles routes ON DEMAND: on a cold .next cache
+# the first hit to a route takes ~20-25s, and while it compiles the page's JS
+# chunks 404 ("ChunkLoadError: Loading chunk app/layout failed"). If you open the
+# UI during that window the app looks broken — which is why killing the stack and
+# re-`up`ing "fixed" it (the second run had a warm .next and won the race). We move
+# that one-time cost off your critical path: start next dev in the background, hit
+# the landing + post-login routes ourselves (a presence cookie clears the edge
+# middleware so protected routes compile too — it isn't the auth boundary), THEN
+# announce readiness. Best-effort: warm-up never takes the server down.
+npm run dev &
+NEXT_PID=$!
+# Forward stop signals to next dev (we lost `exec`, so bash is the child of init).
+trap 'kill -TERM "$NEXT_PID" 2>/dev/null' TERM INT
+
+(
+  # Wait for the dev server to accept connections before warming.
+  for _ in $(seq 1 90); do
+    curl -sf -o /dev/null --max-time 2 http://localhost:3000/ 2>/dev/null && break
+    sleep 1
+  done
+  # /auth/sign-in first — it builds the shared app/layout chunk that was 404ing.
+  # The rest are the routes you land on right after login.
+  for route in /auth/sign-in /desktops /overview /settings; do
+    log "pre-warming ${route} …"
+    curl -s -o /dev/null --max-time 180 -H 'Cookie: infinibay-session=1' \
+      "http://localhost:3000${route}" 2>/dev/null || true
+  done
+  log "routes pre-warmed — the UI is ready to open at :3000 (first load will be fast)."
+) &
+
+wait "$NEXT_PID"
