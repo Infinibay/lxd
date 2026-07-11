@@ -114,24 +114,53 @@ ensure_root_registries() {
   printf 'unqualified-search-registries = ["docker.io"]\n' | sudo tee "$dropin" >/dev/null
 }
 
+# True if a kernel module is already available, via any of the three ways it can
+# be: (1) a loaded LKM exposing /sys/module/<name>, (2) listed in /proc/modules,
+# or (3) COMPILED INTO the kernel — built-ins (e.g. tun with CONFIG_TUN=y) show up
+# in none of the first two but are fully functional, and are enumerated in
+# modules.builtin. All three are plain reads (no sudo), so we can decide whether
+# modprobe is even needed *before* invoking sudo. Missing this built-in case is
+# what made a redundant `sudo modprobe tun` (and its password prompt) fire on
+# every `up`.
+module_loaded() {
+  [ -d "/sys/module/$1" ] && return 0
+  grep -q "^$1 " /proc/modules 2>/dev/null && return 0
+  grep -q "/$1\.ko" "/lib/modules/$(uname -r)/modules.builtin" 2>/dev/null
+}
+
 # VM networking needs a few HOST kernel modules: br_netfilter (so bridge traffic
 # hits iptables → DHCP works), tun (TAP devices), vhost_net + kvm (the hypervisor).
 # A container can't modprobe the host kernel, so we load them here on the host;
 # the backend then sees them via the shared /proc/modules and skips its own
 # modprobe. Idempotent, and persisted to /etc/modules-load.d so they survive reboot.
+#
+# Crucially: we only `sudo modprobe` the modules that AREN'T already present, and
+# we probe the persist file with a plain read. On a normal `up` everything is
+# already loaded (auto-loaded on boot from the persist file), so this makes ZERO
+# sudo calls and never prompts for a password to do nothing — the recurring
+# papercut this guard exists to kill.
 ensure_host_modules() {
   [ "$(uname -s)" = "Linux" ] || return 0
   local s=""; [ "$(id -u)" -ne 0 ] && s="sudo"
   local kvm_mod=kvm_amd
   grep -q GenuineIntel /proc/cpuinfo 2>/dev/null && kvm_mod=kvm_intel
   local mods="br_netfilter tun vhost_net kvm $kvm_mod"
-  c "ensuring host kernel modules for VMs: $mods"
-  local m
+
+  local m missing=""
   for m in $mods; do
-    $s modprobe "$m" 2>/dev/null || warn "could not modprobe $m (continuing)"
+    module_loaded "$m" || missing="$missing $m"
   done
+  if [ -n "$missing" ]; then
+    c "loading host kernel modules for VMs:$missing"
+    for m in $missing; do
+      $s modprobe "$m" 2>/dev/null || warn "could not modprobe $m (continuing)"
+    done
+  fi
+
+  # Persist for auto-load on boot. The existence check is a normal read of a
+  # world-readable path (no sudo); only the write needs root.
   local persist=/etc/modules-load.d/infinibay-dev.conf
-  if ! $s test -f "$persist" 2>/dev/null; then
+  if [ ! -f "$persist" ]; then
     printf '%s\n' $mods | $s tee "$persist" >/dev/null 2>&1 \
       && c "persisted modules → $persist (auto-load on boot)" \
       || warn "could not persist modules to $persist (non-fatal)"
