@@ -56,6 +56,25 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
+# =============================================================================
+#  ⚠  DEPRECATED — dev.sh is superseded by the `iby` CLI (InfiniBaY).
+#
+#  dev.sh still works, but new capabilities land only in `iby`, and this
+#  script will be removed in a future release. Please migrate:
+#
+#      Install:   uv tool install infinibay-iby      (or: uvx infinibay-iby …)
+#      Then use:  iby up              # was: ./dev.sh up  /  make up
+#                 iby down [-v]       # was: ./dev.sh down [-v]
+#                 iby logs backend    # was: ./dev.sh logs backend
+#                 iby --help          # the full command map
+#
+#  Migration table & docs: https://github.com/Infinibay/lxd#iby
+# =============================================================================
+if [ -t 2 ] && [ "${IBY_SILENCE_DEPRECATION:-0}" != "1" ]; then
+  printf '\033[33m⚠  dev.sh is deprecated — use `iby` instead (see the banner at the top of dev.sh, or `iby --help`).\033[0m\n' >&2
+  printf '   Silence this notice with IBY_SILENCE_DEPRECATION=1.\n\n' >&2
+fi
+
 ENV_FILE=".env.docker"
 ENV_EXAMPLE=".env.docker.example"
 COMPOSE_FILES=(-f docker-compose.yml)

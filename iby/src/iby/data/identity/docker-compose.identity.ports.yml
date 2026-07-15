@@ -1,0 +1,22 @@
+# Opt-in host port publishing for the identity engines (`iby engine <kind> up --publish-ports`).
+# The backend reaches the engines over the internal dev network without any of this;
+# publishing is only for host-side tools (ldapsearch from the host) and, for AD, for a
+# real in-guest `realm join` / `Add-Computer` (which also needs the guest's DNS pointed
+# at the DC). Only the started profile's ports are actually published.
+services:
+  openldap:
+    ports:
+      - "389:389"
+      - "636:636"
+
+  samba-dc:
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "88:88/tcp"
+      - "88:88/udp"
+      - "389:389"
+      - "445:445"
+      - "464:464/tcp"
+      - "464:464/udp"
+      - "636:636"

@@ -1,0 +1,48 @@
+# Seed data for the OpenLDAP test engine. Applied by `iby engine ldap seed`
+# (ldapadd -c, so re-running is idempotent — "Already exists" is ignored).
+# The base dc=infinibay,dc=local is created by the image from LDAP_DOMAIN.
+
+dn: ou=people,dc=infinibay,dc=local
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=infinibay,dc=local
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=alice,ou=people,dc=infinibay,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+uid: alice
+cn: Alice Infinibay
+sn: Infinibay
+givenName: Alice
+mail: alice@infinibay.local
+uidNumber: 10001
+gidNumber: 10001
+homeDirectory: /home/alice
+userPassword: Passw0rd!
+
+dn: uid=bob,ou=people,dc=infinibay,dc=local
+objectClass: inetOrgPerson
+objectClass: posixAccount
+uid: bob
+cn: Bob Infinibay
+sn: Infinibay
+givenName: Bob
+mail: bob@infinibay.local
+uidNumber: 10002
+gidNumber: 10002
+homeDirectory: /home/bob
+userPassword: Passw0rd!
+
+dn: cn=infinibay-admins,ou=groups,dc=infinibay,dc=local
+objectClass: groupOfNames
+cn: infinibay-admins
+member: uid=alice,ou=people,dc=infinibay,dc=local
+
+dn: cn=infinibay-users,ou=groups,dc=infinibay,dc=local
+objectClass: groupOfNames
+cn: infinibay-users
+member: uid=alice,ou=people,dc=infinibay,dc=local
+member: uid=bob,ou=people,dc=infinibay,dc=local

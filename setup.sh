@@ -3,6 +3,9 @@ set -euo pipefail
 
 # Infinibay LXD Setup Script
 # Prepares the host system for running Infinibay with LXD
+#
+# NOTE: the unified `iby` CLI will absorb this as `iby lxd setup` in a coming release
+# (the Docker dev stack already moved to `iby`). Until then, setup.sh is the LXD path.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"

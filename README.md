@@ -6,7 +6,7 @@ to run the stack**:
 
 | Path | Command | Use it for |
 |------|---------|------------|
-| 🐳 **Docker / Podman dev stack** | `./dev.sh up` | **Day-to-day development** — one command, hot-reload, clones the app repos and bind-mounts them |
+| 🐳 **Docker / Podman dev stack** | `iby up` | **Day-to-day development** — one command, hot-reload, clones the app repos and bind-mounts them (driven by the **[`iby`](#iby)** CLI; `dev.sh` is its deprecated predecessor) |
 | 📦 **LXD deployment** | `sudo ./setup.sh` → `./run.sh` | **Self-hosting** — LXD system containers, systemd services, `/dev/kvm` passthrough |
 
 Both drive the same Infinibay repos (`backend`, `frontend`, `infinization`,
@@ -17,7 +17,88 @@ Both drive the same Infinibay repos (`backend`, `frontend`, `infinization`,
 
 ---
 
-## 🐳 Docker / Podman dev stack (`dev.sh`)
+## iby
+
+> **`iby` (InfiniBaY) is the canonical CLI to deploy and administer Infinibay.** It
+> replaces `dev.sh` for the Docker/Podman dev stack. `dev.sh` still works but is
+> **deprecated** and will be removed in a future release. (The LXD self-host path —
+> `setup.sh`/`run.sh` — becomes `iby lxd …` in a coming release.)
+
+### Install
+
+```bash
+uv tool install infinibay-iby        # → `iby` on PATH (isolated, uv-managed venv)
+# pinned from this repo's subdirectory:
+uv tool install "infinibay-iby @ git+https://github.com/Infinibay/lxd#subdirectory=iby"
+# zero-install:
+uvx --from infinibay-iby iby doctor
+```
+
+Contributors: `cd iby && uv sync && uv run iby --help`.
+
+### Everyday use
+
+```bash
+iby doctor                 # preflight: runtime, compose v2, /dev/kvm, kernel modules, groups
+iby up                     # bring the dev stack online (clone → build → migrate → start); KVM auto-detected
+iby up -d                  # detached;  --cluster emulates node-1/node-2;  --mtls for real remote mTLS nodes
+iby down [-v]              # stop (-v also drops volumes: db, node_modules, …)
+iby logs [service]         # follow logs         iby status | restart | pull | clean
+iby exec backend -- bash   # shell into a running container
+iby infiniservice build    # cross-compile the in-guest agent
+iby --help                 # the full command map
+```
+
+`iby` **drives the existing `docker-compose*.yml` files** — it does not replace them.
+Every `dev.sh` behaviour is preserved: KVM auto-detection, rootless-podman sudo
+routing, the `--sandbox`/`--mtls`/`--cluster` toggles, the infiniservice auto-build,
+and LAN access. `iby --dry-run up …` prints the exact `compose` command without running it.
+
+### Identity test engines (LDAP + Active Directory)
+
+Stand up a throwaway directory server on the dev network to exercise the Identity
+feature end to end:
+
+```bash
+iby engine ldap up         # OpenLDAP: start → seed alice/bob + groups → print paste-ready config
+iby engine ldap config     # the exact IdentityProvider fields to enter in the UI
+iby engine ldap status     # container state + a live bind probe (user/group counts)
+iby engine ldap down -v    # stop and drop its data
+iby engine ad up           # Samba Active Directory DC (heavier; native memberOf)
+# `iby deploy engine ldap` is a documented alias of `iby engine ldap up`.
+```
+
+Then in the UI: paste the config → **Test connection** → **Sync** (creates the
+users) → log in as `alice` / `Passw0rd!`.
+
+### Migration from `dev.sh` / `make`
+
+| was | now |
+|-----|-----|
+| `./dev.sh up` / `make up` | `iby up` |
+| `./dev.sh up --kvm` / `--cluster` / `--mtls` / `--reconfigure` | `iby up --kvm` / `--cluster` / `--mtls` / `--reconfigure` |
+| `./dev.sh up --skip-infiniservice` | `iby up --infiniservice skip` |
+| `./dev.sh up --rebuild-infiniservice` | `iby up --infiniservice rebuild` |
+| `./dev.sh down [-v]` | `iby down [-v]` |
+| `./dev.sh logs [svc]` / `make logs S=backend` | `iby logs [svc]` |
+| `./dev.sh status` / `restart` / `pull` / `clean` | `iby status` / `restart` / `pull` / `clean` |
+| `./dev.sh build-infiniservice` | `iby infiniservice build` |
+| `./dev.sh reconfigure` | `iby config reconfigure` (or `iby up --reconfigure`) |
+| `./dev.sh join <master>` | `iby node join <master>` |
+| `./dev.sh node up/down/logs/status/restart` | `iby node up/down/logs/status/restart` |
+
+`iby config …` (show/get/set/edit/lan) and `iby repos …` (status/list/clone) are new
+conveniences with no `dev.sh` equivalent.
+
+> **Not yet in `iby` (use `run.sh` meanwhile):** the LXD self-host path
+> (`setup.sh` / `run.sh`) lands as `iby lxd …` in a coming release.
+
+---
+
+## 🐳 Docker / Podman dev stack (`dev.sh` — deprecated)
+
+> **Deprecated:** the `./dev.sh` commands below are superseded by **[`iby`](#iby)**
+> and kept for reference. `dev.sh` still works, but new capabilities land only in `iby`.
 
 One-command, hot-reload dev environment on **Docker or rootless Podman**. It clones
 the app repos into `./repos/`, bind-mounts them into the containers, and reloads on
@@ -167,7 +248,7 @@ to the node's agent. Notes:
   old ephemeral path and are lost on the container recreate** that applies the change —
   recreate them so new disks land in the volume (persistent + migratable).
 
-Current dev-stack version: **v0.6.7** (tracked in `VERSION`).
+Current dev-stack version: **v0.7.0** (tracked in `VERSION`).
 
 ---
 

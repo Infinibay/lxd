@@ -1,0 +1,37 @@
+[project]
+name = "infinibay-iby"
+version = "0.1.0"
+description = "Infinibay unified deploy + admin CLI (iby) — replaces dev.sh"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "ISC" }
+authors = [{ name = "Infinibay" }]
+dependencies = [
+  # Command tree, nested sub-apps, --x/--no-x tri-state, enum args, completion.
+  # Pulls in click + rich + shellingham.
+  "typer>=0.12",
+  "rich>=13",
+  # .env.docker / .env / .env.node parse (never rewrites compose YAML).
+  "python-dotenv>=1.0",
+  # Read upgrade manifests / values.yml for the LXD phase (never rewrites compose YAML).
+  "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-mock", "mypy", "ruff"]
+
+[project.scripts]
+# typer.Typer instances are callable → valid console entry point.
+iby = "iby.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/iby"]
+# src/iby/data/** (identity compose + seed assets) ships as package data automatically.
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

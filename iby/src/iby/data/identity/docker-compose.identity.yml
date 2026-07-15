@@ -1,0 +1,79 @@
+# Infinibay identity test engines — a SEPARATE compose project (infinibay-identity)
+# that attaches to the running dev-stack network so the backend can bind to a real
+# directory by hostname. Brought up/down independently of the main stack via
+# `iby engine ldap|ad …`. Not for production — throwaway test directories.
+#
+# The two directories live behind compose PROFILES (ldap / ad) so `--profile ldap`
+# starts only OpenLDAP and `--profile ad` starts only the Samba AD DC.
+name: infinibay-identity
+
+services:
+  # ── OpenLDAP (the fast, light path) ─────────────────────────────────────────
+  openldap:
+    image: docker.io/osixia/openldap:1.5.0
+    profiles: ["ldap"]
+    hostname: openldap
+    environment:
+      LDAP_ORGANISATION: "Infinibay"
+      LDAP_DOMAIN: "infinibay.local"          # → base DN dc=infinibay,dc=local
+      LDAP_ADMIN_PASSWORD: "admin"            # → bind cn=admin,dc=infinibay,dc=local / admin
+      LDAP_CONFIG_PASSWORD: "config"
+      LDAP_RFC2307BIS_SCHEMA: "true"
+      LDAP_REMOVE_CONFIG_AFTER_SETUP: "false"
+      # LDAPS on :636 with osixia's self-signed cert. The backend's ldapts client
+      # negotiates TLS on bind, so a plaintext-only server drops it; serve TLS and
+      # point the provider at ldaps (useTls=true, tlsInsecureSkipVerify=true in dev).
+      LDAP_TLS: "true"
+      LDAP_TLS_VERIFY_CLIENT: "never"
+    volumes:
+      - ./ldap-seed:/seed:ro
+      - openldap_data:/var/lib/ldap
+      - openldap_config:/etc/ldap/slapd.d
+    networks:
+      default:
+        aliases: ["openldap"]
+    healthcheck:
+      test: ["CMD-SHELL",
+        "ldapsearch -x -H ldap://localhost -b dc=infinibay,dc=local -D cn=admin,dc=infinibay,dc=local -w admin >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  # ── Samba Active Directory DC (heavier; best-effort for real domain-join) ────
+  samba-dc:
+    image: docker.io/nowsci/samba-domain:latest
+    profiles: ["ad"]
+    hostname: samba-dc
+    # A DC needs broad privilege to run its services; this is a dev throwaway.
+    privileged: true
+    environment:
+      DOMAIN: "INFINIBAY.LAN"                 # realm → base DN DC=infinibay,DC=lan
+      DOMAINPASS: "Passw0rd!Passw0rd!"        # Administrator password (AD complexity)
+      DNSFORWARDER: "1.1.1.1"
+      NOCOMPLEXITY: "true"
+      INSECURELDAP: "true"                    # allow simple LDAP bind (no TLS) for the test
+    volumes:
+      - ./ad-seed:/seed:ro
+      - samba_data:/var/lib/samba
+      - samba_config:/etc/samba/external
+    networks:
+      default:
+        aliases: ["samba-dc", "infinibay.lan"]
+    healthcheck:
+      test: ["CMD-SHELL", "samba-tool user list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 40
+
+# Attach to the dev-stack network so the backend resolves openldap:389 / samba-dc:389.
+# Override the name with IDENTITY_NETWORK if your stack project isn't infinibay-dev.
+networks:
+  default:
+    external: true
+    name: ${IDENTITY_NETWORK:-infinibay-dev_default}
+
+volumes:
+  openldap_data:
+  openldap_config:
+  samba_data:
+  samba_config:

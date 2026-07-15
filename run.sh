@@ -1,6 +1,10 @@
 #!/bin/bash
 # Infinibay LXD Management Script
 # Handles profile generation and container lifecycle
+#
+# NOTE: the unified `iby` CLI (which already replaced the Docker dev stack, ex-dev.sh)
+# will absorb this LXD path as `iby lxd …` in a coming release. Until then, run.sh
+# remains the LXD self-host path — no action needed.
 
 set -e
 

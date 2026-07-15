@@ -22,3 +22,6 @@ profiles/generated/
 
 # `./dev.sh join` compute-node runtime config
 .env.node
+
+# iby: identity test-engine assets materialised from the package on first `engine … up`
+/engines/
