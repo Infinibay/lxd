@@ -43,6 +43,12 @@ ENGINES: dict[str, dict] = {
             "groupFilter": "(objectClass=groupOfNames)",
         },
         "users": [("alice", "Passw0rd!"), ("bob", "Passw0rd!")],
+        # group DN → suggested role, for the group→role mapping the backend applies on
+        # sync (needs the memberOf overlay, which `up`/`seed --memberof` enables).
+        "groups": [
+            ("cn=infinibay-admins,ou=groups,dc=infinibay,dc=local", "ADMIN"),
+            ("cn=infinibay-users,ou=groups,dc=infinibay,dc=local", "USER"),
+        ],
     },
     "ad": {
         "service": "samba-dc",
@@ -62,6 +68,11 @@ ENGINES: dict[str, dict] = {
             "groupFilter": "(objectClass=group)",
         },
         "users": [("alice", "Passw0rd!"), ("bob", "Passw0rd!")],
+        # AD populates memberOf natively (no overlay needed).
+        "groups": [
+            ("CN=infinibay-admins,CN=Users,DC=infinibay,DC=lan", "ADMIN"),
+            ("CN=infinibay-users,CN=Users,DC=infinibay,DC=lan", "USER"),
+        ],
     },
 }
 
@@ -77,17 +88,24 @@ def _assets_src() -> Path:
     return Path(__file__).resolve().parents[1] / "data" / "identity"
 
 
+_assets_synced = False
+
+
 def _assets_dir(ctx: AppContext) -> Path:
     """Materialise the packaged compose + seed assets under <project>/engines/identity.
 
-    Kept on disk (not just in the wheel) so they are inspectable and editable, and
-    so the compose file's relative volume paths (./ldap-seed) resolve.
+    Refreshed from the package once per `iby` invocation, so upgrading iby drops
+    updated seed scripts automatically. The tree is throwaway + gitignored — edit the
+    packaged sources under iby/src/iby/data/identity, not this copy. Kept on disk so
+    the compose file's relative volume mounts (./ldap-seed) resolve and the assets are
+    inspectable.
     """
+    global _assets_synced
     dest = ctx.require_project_dir() / "engines" / "identity"
-    if not (dest / "docker-compose.identity.yml").exists() and not ctx.dry_run:
+    if not ctx.dry_run and not _assets_synced:
         dest.mkdir(parents=True, exist_ok=True)
         shutil.copytree(_assets_src(), dest, dirs_exist_ok=True)
-        ctx.console.info(f"materialised identity engine assets → {dest}")
+        _assets_synced = True
     return dest
 
 
@@ -106,35 +124,50 @@ def _stack_running(ctx: AppContext, *, sudo: bool) -> bool:
 
 
 def _resolve_sudo(ctx: AppContext) -> bool:
-    """The identity engine must share the backend's podman namespace.
+    """Decide whether the engine runs rootful (sudo) so it shares the backend's
+    podman namespace — deterministically and WITHOUT needing a TTY.
 
-    Deterministic override first: `IBY_ENGINE_SUDO=1|0` forces rootful/rootless (use it
-    when the stack runs rootful — auto-detection needs a TTY for its `sudo docker ps`
-    probe, which a backgrounded `up` can't provide, and a stale rootless network would
-    otherwise misroute the engine away from a rootful backend).
+    `IBY_ENGINE_SUDO=1|0` forces it. Otherwise, mirror exactly how `iby up` routes
+    the stack (see runtime.detect_runtime):
 
-    Otherwise: prefer the namespace where the stack is actually RUNNING; only then fall
-    back to wherever the network merely exists. Rootless is probed first so a rootless
-    host never sudos.
+      1. If a rootless dev stack is actually RUNNING, colocate rootless (no sudo).
+         Only a running backend counts — a leftover rootless network is ignored, so
+         a dangling net can't misroute a rootful stack (the old auto-detect bug).
+      2. Else derive from the runtime alone: only rootless podman on a KVM Linux host
+         is routed through sudo (rootful podman), which is what `iby up` does. Plain
+         docker (root daemon), running as root, or rootful podman already sit in the
+         correct namespace → no sudo.
+
+    Every branch is a plain capability probe (geteuid / `docker info` / /dev/kvm) — no
+    `sudo` invocation — so detection works head-less. A backgrounded `up` used to fall
+    through to a stale rootless network here; now it can't, which is why the manual
+    `IBY_ENGINE_SUDO=1` workaround is no longer needed.
     """
     override = os.environ.get("IBY_ENGINE_SUDO")
     if override is not None:
         return override.strip().lower() in ("1", "true", "yes", "on")
     if ctx.dry_run:
         return False
-    net = _network_name(ctx)
     if _stack_running(ctx, sudo=False):
         return False
-    if detect.has("sudo") and _stack_running(ctx, sudo=True):
-        return True
-    if _network_exists(ctx, net, sudo=False):
+    if os.geteuid() == 0:
         return False
-    if detect.has("sudo") and _network_exists(ctx, net, sudo=True):
-        return True
-    raise IbyError(
-        f"dev network '{net}' not found — run `iby up` first so the identity engine can attach to it.",
-        hint="or set IDENTITY_NETWORK to your stack's network name",
-    )
+    if not detect.is_podman(ctx.runner) or not detect.is_rootless_podman(ctx.runner):
+        return False  # docker (root daemon) or rootful podman: current namespace is correct
+    return detect.kvm_available() and detect.has("sudo")
+
+
+def _require_network(ctx: AppContext, *, sudo: bool) -> None:
+    """Fail early with guidance if the target namespace has no dev network to attach to."""
+    if ctx.dry_run:
+        return
+    net = _network_name(ctx)
+    if not _network_exists(ctx, net, sudo=sudo):
+        raise IbyError(
+            f"dev network '{net}' not found in the {'rootful' if sudo else 'rootless'} podman "
+            "namespace — run `iby up` first so the identity engine can attach to it.",
+            hint="non-standard project name → set IDENTITY_NETWORK; wrong namespace → IBY_ENGINE_SUDO=1|0",
+        )
 
 
 # ── compose driver for the identity project ──────────────────────────────────
@@ -187,7 +220,16 @@ def _wait_healthy(ctx: AppContext, kind: str, service: str, *, sudo: bool, timeo
 # ── verbs ────────────────────────────────────────────────────────────────────
 def up(ctx: AppContext, kind: str, *, seed: bool = True, publish: bool = False) -> None:
     spec = _spec(kind)
+    if kind == "ad":
+        ctx.console.warn(
+            "the AD engine runs a PRIVILEGED Samba DC (its own DNS/Kerberos, host-level "
+            "reach). On a shared rootful (KVM) host it can stress the podman runtime and "
+            "wedge sibling containers' crun state. Prefer running it when the main stack "
+            "isn't live; recover with `iby down` + `sudo podman pod rm -f pod_infinibay-dev`. "
+            "The group→role flow is already covered by the lighter `ldap` engine."
+        )
     sudo = _resolve_sudo(ctx)
+    _require_network(ctx, sudo=sudo)
     _compose(ctx, kind, "up", "-d", sudo=sudo, publish=publish)
     if _wait_healthy(ctx, kind, spec["service"], sudo=sudo) and seed:
         _seed(ctx, kind, sudo=sudo, memberof=(kind == "ldap"))
@@ -214,14 +256,18 @@ def _seed(ctx: AppContext, kind: str, *, sudo: bool, memberof: bool) -> None:
         )
         if memberof:
             res = _exec(
-                ctx, kind, "openldap",
-                ["ldapmodify", "-Y", "EXTERNAL", "-H", "ldapi:///", "-f", "/seed/10-memberof.ldif"],
+                ctx, kind, "openldap", ["sh", "/seed/10-memberof.sh"],
                 sudo=sudo, check=False, capture=True,
             )
-            if not res.ok:
+            if res.ok:
+                ctx.console.success(
+                    "memberOf overlay applied — alice ∈ infinibay-admins+users, bob ∈ infinibay-users. "
+                    "Map infinibay-admins → ADMIN in the UI to make alice an admin on sync."
+                )
+            else:
                 ctx.console.warn(
-                    "memberOf overlay not applied (group→role mapping stays USER). "
-                    "Non-fatal; see engines/identity/ldap-seed/10-memberof.ldif."
+                    "memberOf overlay not applied (group→role mapping stays USER). Non-fatal; "
+                    "inspect engines/identity/ldap-seed/10-memberof.sh."
                 )
     else:
         _exec(ctx, kind, "samba-dc", ["sh", "/seed/seed.sh"], sudo=sudo, check=False)
@@ -281,6 +327,20 @@ def config(ctx: AppContext, kind: str) -> None:
     creds = ", ".join(f"{u} / {p}" for u, p in spec["users"])
     ctx.console.info(f"test users: {creds}")
     ctx.console.info("flow: paste → Test connection → Sync (creates the users) → log in as a user.")
+    groups = spec.get("groups") or []
+    if groups:
+        gtable = Table(title="group → role mappings (add under the provider to elevate roles)",
+                       title_style="bold cyan")
+        gtable.add_column("group DN", style="bold")
+        gtable.add_column("role", style="green")
+        for dn, role in groups:
+            gtable.add_row(dn, role)
+        ctx.console.render(gtable)
+        ctx.console.info(
+            "these drive group→role elevation on sync (map infinibay-admins → ADMIN and alice syncs as ADMIN). "
+            + ("LDAP needs the memberOf overlay — `up`/`seed --memberof` enables it."
+               if kind == "ldap" else "AD reports memberOf natively.")
+        )
     ctx.console.info(
         "note: useTls=true + tlsInsecureSkipVerify=true — the backend's ldapts client negotiates TLS on "
         "bind, so the directory is served over LDAPS (:636) with a self-signed cert (accepted in dev)."

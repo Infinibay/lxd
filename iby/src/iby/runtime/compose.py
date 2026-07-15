@@ -44,12 +44,22 @@ class StackRuntime:
         return argv
 
     def compose(self, *args: str, check: bool = True, capture: bool = False) -> Result:
-        """Run a compose subcommand (e.g. compose('up', '--build'))."""
+        """Run a compose subcommand (e.g. compose('up', '--build')).
+
+        The LAN/host overrides (NEXT_PUBLIC_*, APP_HOST, ALLOWED_ORIGINS, …) MUST be
+        forwarded as `env K=V` AFTER sudo — NOT via the child process env. On the
+        rootful (KVM) path sudo's env_reset strips the child environment before
+        podman-compose interpolates `${VAR}`, so passing them as `extra_env` drops
+        them silently and the localhost defaults baked into --env-file win instead
+        (this is exactly why remote/LAN access broke). A forwarded var survives sudo
+        AND takes precedence over --env-file (verified against podman-compose). The
+        explicit env_forward (sandbox/mtls) wins on any key collision.
+        """
+        forward = {**self.env_overrides, **self.env_forward}
         return self.ctx.runner.run(
             [*self._base_argv(), *args],
             sudo=self.engine_sudo,
-            env_forward=self.env_forward,
-            extra_env=self.env_overrides,
+            env_forward=forward,
             cwd=self.project_dir,
             check=check,
             capture=capture,
