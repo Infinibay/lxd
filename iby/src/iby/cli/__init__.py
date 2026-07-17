@@ -19,6 +19,7 @@ from ..core.errors import IbyError
 from ..models.enums import Runtime
 from . import config as config_cli
 from . import engine as engine_cli
+from . import gpu as gpu_cli
 from . import infiniservice as infiniservice_cli
 from . import node as node_cli
 from . import repos as repos_cli
@@ -101,6 +102,7 @@ typer_app.command("clean")(stack_cli.clean)
 # Groups.
 typer_app.add_typer(engine_cli.engine_app, name="engine")
 typer_app.add_typer(engine_cli.deploy_app, name="deploy")
+typer_app.add_typer(gpu_cli.gpu_app, name="gpu")
 typer_app.add_typer(node_cli.node_app, name="node")
 typer_app.add_typer(config_cli.config_app, name="config")
 typer_app.add_typer(repos_cli.repos_app, name="repos")

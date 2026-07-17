@@ -20,7 +20,7 @@ from ..models.enums import InfiniserviceMode
 from ..runtime import detect, modules, registries
 from ..runtime.compose import StackRuntime
 from ..runtime.runtime import detect_runtime
-from . import infiniservice, lan, repos, wizard
+from . import gpu, infiniservice, lan, repos, wizard
 
 
 # ── env seeding (dev.sh ensure_master_env) ───────────────────────────────────
@@ -55,6 +55,7 @@ def prepare_stack(
     want_mtls: bool | None = None,
     want_reconfigure: bool = False,
     sandbox: bool | None = None,
+    want_gpu: bool = False,
 ) -> StackRuntime:
     """Resolve everything needed to drive compose. Faithful to dev.sh ensure_env."""
     project = ctx.require_project_dir()
@@ -91,6 +92,17 @@ def prepare_stack(
         ctx.console.info("external database configured — bundled postgres disabled")
     decision = detect_runtime(ctx, want_kvm=want_kvm, merged_env=merged_env)
     compose_files += decision.extra_files
+    if want_gpu:
+        # infinigpu render path: auto-detect the GPU, ensure the NVIDIA CDI spec
+        # (explained + sudo-confirmed inside), and compose in the GPU override.
+        if not decision.kvm_active:
+            raise IbyError(
+                "--gpu needs KVM — GPU VMs are real VMs and the vfio-user device rides on the QEMU/KVM path.",
+                hint="run on a /dev/kvm host (this host reports KVM inactive), e.g. iby up --gpu --kvm.",
+            )
+        override = gpu.ensure_gpu_ready(ctx, ctx.repos_dir)
+        compose_files.append(os.path.relpath(override, project))
+        ctx.console.info("infinigpu GPU override enabled (nvidia).")
     if want_cluster:
         compose_files.append("docker-compose.cluster.yml")
         ctx.console.info("cluster emulation ON — adds compute-node agents (node-1, node-2)")
@@ -185,6 +197,7 @@ def up(
     want_mtls: bool | None,
     want_reconfigure: bool,
     sandbox: bool | None,
+    want_gpu: bool,
     infiniservice_mode: InfiniserviceMode,
     build: bool,
     detach: bool,
@@ -197,6 +210,7 @@ def up(
         want_mtls=want_mtls,
         want_reconfigure=want_reconfigure,
         sandbox=sandbox,
+        want_gpu=want_gpu,
     )
     # mtls ⊕ cluster guard — evaluated AFTER prepare so it sees the EFFECTIVE mtls
     # value (this run's flag OR a value persisted in the env file).

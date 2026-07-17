@@ -17,7 +17,7 @@ from rich.table import Table
 
 from ..core.context import AppContext
 from ..core.errors import NoComposeProvider
-from ..runtime import detect, modules, registries
+from ..runtime import detect, gpu, modules, registries
 
 _STATUS_STYLE = {"ok": "green", "warn": "yellow", "fail": "red", "n/a": "dim"}
 
@@ -109,6 +109,24 @@ def run(ctx: AppContext, *, fix: bool = False) -> bool:
                 "member" if in_kvm else "not a member (rootless podman needs it for /dev/kvm)",
             )
         )
+
+    # ── GPU (infinigpu render path — NVIDIA only for now) ────────────────────
+    if platform.system() == "Linux":
+        vendor = gpu.detect_vendor()
+        if vendor.value == "nvidia":
+            checks.append(Check("GPU", "ok", f"nvidia — {len(gpu.nvidia_gpus(r))} detected"))
+            if gpu.cdi_ready():
+                checks.append(Check("NVIDIA CDI", "ok", str(gpu.CDI_SPEC)))
+            elif gpu.has_nvidia_ctk():
+                checks.append(Check("NVIDIA CDI", "warn", "absent — `iby up --gpu` / `iby gpu setup` generates it (sudo)"))
+            else:
+                checks.append(Check("NVIDIA CDI", "warn", "nvidia-ctk missing — install nvidia-container-toolkit"))
+            if gpu.vfio_user_qemu() is None:
+                checks.append(Check("vfio-user QEMU", "warn", "absent — scripts/build-qemu-vfio-user.sh (needed for GPU VMs)"))
+            else:
+                checks.append(Check("vfio-user QEMU", "ok", str(gpu.VFIO_USER_QEMU)))
+        else:
+            checks.append(Check("GPU", "n/a", "no NVIDIA GPU detected — infinigpu render path off"))
 
     _render(ctx, checks)
     return not any(c.status == "fail" for c in checks)

@@ -27,6 +27,10 @@ def up(
     cluster: bool = typer.Option(
         False, "--cluster/--no-cluster", help="Add emulated compute nodes (node-1/node-2)."
     ),
+    gpu: bool = typer.Option(
+        False, "--gpu/--no-gpu",
+        help="Enable infinigpu virtual GPUs: auto-detect the GPU, ensure the NVIDIA CDI spec (asks sudo), add the GPU compose override.",
+    ),
     mtls: Optional[bool] = typer.Option(
         None, "--mtls/--no-mtls", help="Cluster mTLS ops server (:4433) for real remote nodes. Sticky."
     ),
@@ -59,6 +63,7 @@ def up(
         want_mtls=mtls,
         want_reconfigure=reconfigure,
         sandbox=sandbox,
+        want_gpu=gpu,
         infiniservice_mode=mode,
         build=build,
         detach=detach,

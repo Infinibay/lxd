@@ -24,6 +24,17 @@ class EngineKind(str, Enum):
     ad = "ad"
 
 
+class GpuVendor(str, Enum):
+    """Detected host GPU vendor for the infinigpu render path.
+
+    NVIDIA-only for now (owner: other vendors — AMD/Intel — come later). `none`
+    means no supported GPU was detected.
+    """
+
+    nvidia = "nvidia"
+    none = "none"
+
+
 class InfiniserviceMode(str, Enum):
     """Guest-agent build control on `iby up` (`--infiniservice {auto,skip,rebuild}`).
 
