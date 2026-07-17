@@ -48,12 +48,16 @@ def run(ctx: AppContext, *, fix: bool = False) -> bool:
     else:
         checks.append(Check("project root", "fail", "not found — cd into lxd or pass --project-dir"))
 
-    # ── container CLI ────────────────────────────────────────────────────────
+    # ── container CLI + active engine ────────────────────────────────────────
     has_docker, has_podman = detect.has("docker"), detect.has("podman")
-    podman_backed = (has_docker or has_podman) and detect.is_podman(r)
-    if has_docker or has_podman:
-        which = "podman (docker shim)" if podman_backed else "docker"
-        checks.append(Check("container CLI", "ok", which))
+    podman_backed = (has_docker or has_podman) and detect.engine_is_podman(r)
+    if has_docker and podman_backed:
+        # real docker CLI whose DOCKER_HOST points at a podman socket (or the shim)
+        checks.append(Check("container CLI", "ok", "docker CLI → podman engine (native features via podman-compose)"))
+    elif podman_backed:
+        checks.append(Check("container CLI", "ok", "podman"))
+    elif has_docker or has_podman:
+        checks.append(Check("container CLI", "ok", "docker"))
     else:
         checks.append(Check("container CLI", "fail", "neither docker nor podman on PATH"))
 

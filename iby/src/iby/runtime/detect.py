@@ -50,6 +50,23 @@ def is_rootless_podman(runner: Runner) -> bool:
     return "rootless: true" in runner.capture([container_cli(), "info"])
 
 
+def engine_is_podman(runner: Runner) -> bool:
+    """True when the ACTIVE engine (server) is podman — including a real `docker` CLI
+    whose DOCKER_HOST points at a podman socket.
+
+    Checks the SERVER, not just the client, because `docker compose` driving a podman
+    socket silently loses podman-native features the dev stack's KVM path depends on
+    (notably `group_add: [keep-groups]`, which gives the rootless container /dev/kvm
+    + GPU group access). `docker version` prints both halves; podman's server banner
+    reads 'Podman Engine'. Falls back to the client-side shim probe if the server is
+    unreachable."""
+    if not has("docker"):
+        return has("podman")
+    if "podman" in runner.capture([container_cli(), "version"]).lower():
+        return True
+    return is_podman(runner)
+
+
 def kvm_available() -> bool:
     return platform.system() == "Linux" and Path("/dev/kvm").exists()
 
@@ -61,13 +78,20 @@ def _compose_major(text: str) -> int | None:
 
 
 def resolve_compose(runner: Runner) -> list[str]:
-    """Pick a Compose Spec v2+ provider, **preferring docker, then podman** (autodetect).
+    """Pick a Compose Spec v2+ provider, matched to the ACTIVE engine (autodetect).
 
-    Order: `docker compose` plugin → standalone `docker-compose` (v2+) → `podman-compose`.
-    Any major >= 2 is accepted (the plugin ships as v2/v3/…/v5); only legacy
-    docker-compose v1 is rejected, since the files use v2-only features (top-level
-    `name:`, x-* anchors).
+    The tool must match the engine, not just be "docker if present": a **podman**
+    engine (even behind a `docker` CLI pointed at a podman socket) needs
+    **podman-compose**, because `docker compose` over the podman socket drops
+    podman-native features the KVM path relies on (`keep-groups` → rootless /dev/kvm).
+    A **real docker** engine prefers **docker compose** → standalone `docker-compose`.
+    Any compose major >= 2 is accepted (the plugin ships v2..v5); only legacy
+    docker-compose v1 is rejected (the files use v2-only features).
     """
+    # Podman engine → its native compose (docker compose can't do keep-groups here).
+    if engine_is_podman(runner) and has("podman-compose"):
+        return ["podman-compose"]
+    # Real docker engine → the compose plugin, then the standalone v2+ binary.
     if has("docker"):
         major = _compose_major(runner.capture(["docker", "compose", "version"]))
         if major and major >= 2:
@@ -76,6 +100,7 @@ def resolve_compose(runner: Runner) -> list[str]:
         major = _compose_major(runner.capture(["docker-compose", "version", "--short"]))
         if major and major >= 2:
             return ["docker-compose"]
+    # Last resort: podman-compose even if the engine probe was inconclusive.
     if has("podman-compose"):
         return ["podman-compose"]
     raise NoComposeProvider(
