@@ -92,8 +92,11 @@ def _detect_node_runtime(ctx: AppContext, *, starting: bool, node_kvm: str | Non
 
 def prepare_node_env(ctx: AppContext, *, starting: bool, node_kvm: str | None = None) -> NodeRuntime:
     project = ctx.require_project_dir()
-    if not detect.has("docker"):
-        raise MissingTool("missing required tool: docker", hint="install docker, or podman (podman-docker)")
+    if not (detect.has("docker") or detect.has("podman")):
+        raise MissingTool(
+            "no container engine found (need docker or podman)",
+            hint="install docker (with the compose plugin), or podman + podman-compose",
+        )
     compose_cmd = detect.resolve_compose(ctx.runner)
     if detect.is_podman(ctx.runner):
         registries.ensure_podman_registries(ctx)
@@ -106,11 +109,11 @@ def prepare_node_env(ctx: AppContext, *, starting: bool, node_kvm: str | None = 
 
 # ── enrollment-volume helpers ─────────────────────────────────────────────────
 def _node_base_mountpoint(ctx: AppContext, sudo: bool) -> str:
-    names = ctx.runner.capture(["docker", "volume", "ls", "--format", "{{.Name}}"], sudo=sudo).splitlines()
+    names = ctx.runner.capture([detect.container_cli(), "volume", "ls", "--format", "{{.Name}}"], sudo=sudo).splitlines()
     vol = next((n for n in names if n.endswith("node_infinibay_base")), "")
     if not vol:
         return ""
-    return ctx.runner.capture(["docker", "volume", "inspect", vol, "--format", "{{.Mountpoint}}"], sudo=sudo)
+    return ctx.runner.capture([detect.container_cli(), "volume", "inspect", vol, "--format", "{{.Mountpoint}}"], sudo=sudo)
 
 
 def _node_wipe_enrollment(ctx: AppContext, mp: str, sudo: bool) -> None:
@@ -130,7 +133,7 @@ def _node_default_token(ctx: AppContext) -> str:
 
 def _node_agent_container(ctx: AppContext, sudo: bool) -> str:
     out = ctx.runner.capture(
-        ["docker", "ps", "-a", "--filter", "name=node-agent", "--format", "{{.Names}}"], sudo=sudo
+        [detect.container_cli(), "ps", "-a", "--filter", "name=node-agent", "--format", "{{.Names}}"], sudo=sudo
     )
     lines = out.splitlines()
     return lines[0] if lines else ""
@@ -341,16 +344,16 @@ def node_cmd(ctx: AppContext, sub: str = "status", *, kvm: bool = False, rest: l
         if not cid:
             raise IbyError(f"no node-agent container in the {ns} engine namespace — {hint}")
         ctx.console.info(f"restarting {cid}…")
-        ctx.runner.run(["docker", "restart", cid], sudo=sudo)
-        ctx.runner.run(["docker", "ps", "--filter", "name=node-agent"], sudo=sudo, check=False)
+        ctx.runner.run([detect.container_cli(), "restart", cid], sudo=sudo)
+        ctx.runner.run([detect.container_cli(), "ps", "--filter", "name=node-agent"], sudo=sudo, check=False)
     elif sub == "logs":
         if not cid:
             raise IbyError(f"no node-agent container in the {ns} engine namespace — {hint}")
         ctx.console.info(f"streaming logs for {cid} (Ctrl-C to stop)…")
-        ctx.runner.run(["docker", "logs", "-f", *rest, cid], sudo=sudo, check=False)
+        ctx.runner.run([detect.container_cli(), "logs", "-f", *rest, cid], sudo=sudo, check=False)
     elif sub in ("status", "ps"):
         if cid:
-            ctx.runner.run(["docker", "ps", "-a", "--filter", "name=node-agent"], sudo=sudo, check=False)
+            ctx.runner.run([detect.container_cli(), "ps", "-a", "--filter", "name=node-agent"], sudo=sudo, check=False)
         else:
             ctx.console.warn(f"no node-agent container in the {ns} engine namespace.")
             ctx.console.info(hint)

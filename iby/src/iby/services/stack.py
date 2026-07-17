@@ -42,9 +42,12 @@ def _ensure_master_env(ctx: AppContext) -> None:
     )
 
 
-def _require_docker(ctx: AppContext) -> None:
-    if not detect.has("docker"):
-        raise MissingTool("missing required tool: docker", hint="install docker, or podman (podman-docker)")
+def _require_engine(ctx: AppContext) -> None:
+    if not (detect.has("docker") or detect.has("podman")):
+        raise MissingTool(
+            "no container engine found (need docker or podman)",
+            hint="install docker (with the compose plugin), or podman + podman-compose",
+        )
 
 
 def prepare_stack(
@@ -59,7 +62,7 @@ def prepare_stack(
 ) -> StackRuntime:
     """Resolve everything needed to drive compose. Faithful to dev.sh ensure_env."""
     project = ctx.require_project_dir()
-    _require_docker(ctx)
+    _require_engine(ctx)
     compose_cmd = detect.resolve_compose(ctx.runner)
     ctx.console.info(f"compose provider: {' '.join(compose_cmd)}")
     if detect.is_podman(ctx.runner):

@@ -54,7 +54,7 @@ def run_setup_tui(ctx: AppContext, *, reconfigure: bool = False) -> None:
         + (" ".join(extra))
     )
     ctx.runner.run(
-        ["docker", "run", "--rm", "-it", "-v", f"{project}:/work", "-w", "/work/setup-tui",
+        [detect.container_cli(), "run", "--rm", "-it", "-v", f"{project}:/work", "-w", "/work/setup-tui",
          "docker.io/library/node:20", "sh", "-lc", inner],
         error="setup cancelled",
     )

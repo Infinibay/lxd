@@ -9,6 +9,7 @@ engine sudo); `build()` cross-compiles it (Windows .exe + Linux ELF) — slow.
 from __future__ import annotations
 
 from ..core.context import AppContext
+from ..runtime import detect
 from ..runtime.compose import StackRuntime
 from . import repos
 
@@ -20,11 +21,12 @@ _BUILT_MARKER = "infiniservice/binaries/linux/infiniservice"
 def built(ctx: AppContext, rt: StackRuntime) -> bool:
     """True iff the agent is already compiled into the infinibay_base volume."""
     sudo = rt.engine_sudo
-    names = ctx.runner.capture(["docker", "volume", "ls", "--format", "{{.Name}}"], sudo=sudo).splitlines()
+    cli = detect.container_cli()
+    names = ctx.runner.capture([cli, "volume", "ls", "--format", "{{.Name}}"], sudo=sudo).splitlines()
     vol = next((n for n in names if n.endswith("_infinibay_base")), "")
     if not vol:
         return False
-    mp = ctx.runner.capture(["docker", "volume", "inspect", "-f", "{{ .Mountpoint }}", vol], sudo=sudo)
+    mp = ctx.runner.capture([cli, "volume", "inspect", "-f", "{{ .Mountpoint }}", vol], sudo=sudo)
     if not mp:
         return False
     return ctx.runner.succeeds(["test", "-f", f"{mp}/{_BUILT_MARKER}"], sudo=sudo)

@@ -24,6 +24,7 @@ from rich.table import Table
 from ..core.context import AppContext
 from ..core.errors import IbyError
 from ..models.enums import GpuVendor
+from ..runtime import detect
 from ..runtime import gpu as gpu_rt
 from ..runtime.compose import StackRuntime
 from . import repos
@@ -68,11 +69,12 @@ def built(ctx: AppContext, rt: StackRuntime) -> bool:
     Namespace-correct volume probe (mirrors infiniservice.built): the vfio-user QEMU
     landing in the volume is the reliable "already built?" signal."""
     sudo = rt.engine_sudo
-    names = ctx.runner.capture(["docker", "volume", "ls", "--format", "{{.Name}}"], sudo=sudo).splitlines()
+    cli = detect.container_cli()
+    names = ctx.runner.capture([cli, "volume", "ls", "--format", "{{.Name}}"], sudo=sudo).splitlines()
     vol = next((n for n in names if n.endswith("_infinigpu_build")), "")
     if not vol:
         return False
-    mp = ctx.runner.capture(["docker", "volume", "inspect", "-f", "{{ .Mountpoint }}", vol], sudo=sudo)
+    mp = ctx.runner.capture([cli, "volume", "inspect", "-f", "{{ .Mountpoint }}", vol], sudo=sudo)
     if not mp:
         return False
     return ctx.runner.succeeds(["test", "-f", f"{mp}/bin/qemu-system-x86_64"], sudo=sudo)

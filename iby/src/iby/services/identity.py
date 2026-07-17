@@ -115,12 +115,12 @@ def _network_name(ctx: AppContext) -> str:
 
 
 def _network_exists(ctx: AppContext, net: str, *, sudo: bool) -> bool:
-    names = ctx.runner.capture(["docker", "network", "ls", "--format", "{{.Name}}"], sudo=sudo).splitlines()
+    names = ctx.runner.capture([detect.container_cli(), "network", "ls", "--format", "{{.Name}}"], sudo=sudo).splitlines()
     return net in names
 
 
 def _stack_running(ctx: AppContext, *, sudo: bool) -> bool:
-    return bool(ctx.runner.capture(["docker", "ps", "--filter", "name=infinibay-dev", "--format", "{{.Names}}"], sudo=sudo).strip())
+    return bool(ctx.runner.capture([detect.container_cli(), "ps", "--filter", "name=infinibay-dev", "--format", "{{.Names}}"], sudo=sudo).strip())
 
 
 def _resolve_sudo(ctx: AppContext) -> bool:
