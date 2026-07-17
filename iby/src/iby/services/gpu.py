@@ -18,7 +18,6 @@ CONFIRM → sudo → execute.** Nothing touches the host silently.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 from rich.table import Table
 
@@ -26,11 +25,14 @@ from ..core.context import AppContext
 from ..core.errors import IbyError
 from ..models.enums import GpuVendor
 from ..runtime import gpu as gpu_rt
+from ..runtime.compose import StackRuntime
+from . import repos
 
 
-def ensure_gpu_ready(ctx: AppContext, repos_dir: Path) -> Path:
-    """Detect the GPU, ensure prerequisites (transparently), and return the compose
-    override path to append. Raises IbyError with actionable guidance on a hard gap."""
+def ensure_gpu_ready(ctx: AppContext, rt: StackRuntime) -> None:
+    """Detect the GPU, ensure the (privileged, explained) CDI prerequisite, and build
+    the container-native render artifacts if the volume is empty. Raises IbyError with
+    actionable guidance on a hard gap. Assumes the infinigpu repo is already cloned."""
     vendor = gpu_rt.detect_vendor()
     if vendor is GpuVendor.none:
         raise IbyError(
@@ -41,16 +43,51 @@ def ensure_gpu_ready(ctx: AppContext, repos_dir: Path) -> Path:
     for line in gpu_rt.nvidia_gpus(ctx.runner):
         ctx.console.info(f"  • {line}")
 
-    override = gpu_rt.override_path(repos_dir)
+    override = gpu_rt.override_path(ctx.repos_dir)
     if not override.exists():
         raise IbyError(
             f"infinigpu GPU compose override not found: {override}",
-            hint="is repos/infinigpu checked out on this host? (`iby up` clones the app repos)",
+            hint="the infinigpu repo did not clone/check out — verify gh/git auth, then re-run `iby up --gpu`.",
         )
 
+    # Privileged step first, so a declined sudo fails BEFORE the long artifact build.
     _ensure_cdi(ctx)
-    _preflight(ctx, repos_dir)
-    return override
+
+    if ctx.dry_run:
+        ctx.console.info("dry-run: would build the GPU render artifacts if the volume is empty (skipped the probe).")
+        return
+    if built(ctx, rt):
+        ctx.console.info("infinigpu render artifacts already built — skipping.")
+    else:
+        build(ctx, rt)
+
+
+def built(ctx: AppContext, rt: StackRuntime) -> bool:
+    """True iff the container-native render artifacts are present in infinigpu_build.
+
+    Namespace-correct volume probe (mirrors infiniservice.built): the vfio-user QEMU
+    landing in the volume is the reliable "already built?" signal."""
+    sudo = rt.engine_sudo
+    names = ctx.runner.capture(["docker", "volume", "ls", "--format", "{{.Name}}"], sudo=sudo).splitlines()
+    vol = next((n for n in names if n.endswith("_infinigpu_build")), "")
+    if not vol:
+        return False
+    mp = ctx.runner.capture(["docker", "volume", "inspect", "-f", "{{ .Mountpoint }}", vol], sudo=sudo)
+    if not mp:
+        return False
+    return ctx.runner.succeeds(["test", "-f", f"{mp}/bin/qemu-system-x86_64"], sudo=sudo)
+
+
+def build(ctx: AppContext, rt: StackRuntime) -> None:
+    """Build the vfio-user QEMU + infinigpu-device into the shared volume (ABI-matched
+    to the backend container) via the builders profile. The QEMU compile is slow the
+    first time; the builder image caches it, so re-runs only rebuild the device binary."""
+    repos.clone_one(ctx, "infinigpu")
+    ctx.console.info(
+        "building the infinigpu render artifacts (vfio-user QEMU + device server), ABI-matched to the "
+        "backend container… the QEMU compile is slow the first time (image-cached after)."
+    )
+    rt.compose("--profile", "builders", "run", "--rm", "--build", "infinigpu-builder")
 
 
 def _ensure_cdi(ctx: AppContext) -> None:
@@ -104,20 +141,6 @@ def _ensure_cdi(ctx: AppContext) -> None:
     ctx.console.success(f"NVIDIA CDI spec generated → {gpu_rt.CDI_SPEC}")
 
 
-def _preflight(ctx: AppContext, repos_dir: Path) -> None:
-    """Non-fatal warnings for the two host artifacts the override bind-mounts."""
-    if gpu_rt.vfio_user_qemu() is None:
-        ctx.console.warn(
-            f"vfio-user QEMU not found at {gpu_rt.VFIO_USER_QEMU} — GPU VMs will not boot. "
-            "Build it: ( cd repos/infinigpu && ./scripts/build-qemu-vfio-user.sh )"
-        )
-    if gpu_rt.device_binary(repos_dir) is None:
-        ctx.console.warn(
-            "infinigpu-device binary not built — the per-VM device server cannot spawn. "
-            "Build it: ( cd repos/infinigpu && cargo build --release -p infinigpu-device )"
-        )
-
-
 def _explain_and_confirm(ctx: AppContext, *, title: str, why: str, files: list[str], command: str) -> bool:
     """Print a structured what/why/which-files explanation, then ask to proceed.
     `--yes` short-circuits to yes. This is the standard shape for every privileged
@@ -135,7 +158,7 @@ def _explain_and_confirm(ctx: AppContext, *, title: str, why: str, files: list[s
     return ctx.console.confirm("Proceed with this privileged step?", default=True)
 
 
-def status(ctx: AppContext, repos_dir: Path) -> None:
+def status(ctx: AppContext, rt: StackRuntime) -> None:
     """Render the GPU readiness table (`iby gpu status`)."""
     vendor = gpu_rt.detect_vendor()
     table = Table(title="iby gpu", title_style="bold cyan", show_lines=False)
@@ -157,10 +180,14 @@ def status(ctx: AppContext, repos_dir: Path) -> None:
     row("GPUs", bool(gpus), "; ".join(gpus) or "nvidia-smi returned none", warn=not gpus)
     row("nvidia-ctk", gpu_rt.has_nvidia_ctk(), "present" if gpu_rt.has_nvidia_ctk() else "missing (needed for CDI)", warn=True)
     row("CDI spec", gpu_rt.cdi_ready(), str(gpu_rt.CDI_SPEC) if gpu_rt.cdi_ready() else "absent — `iby gpu setup` generates it", warn=True)
-    qemu = gpu_rt.vfio_user_qemu()
-    row("vfio-user QEMU", qemu is not None, str(qemu) if qemu else "absent — ./scripts/build-qemu-vfio-user.sh", warn=True)
-    binp = gpu_rt.device_binary(repos_dir)
-    row("device binary", binp is not None, str(binp) if binp else "absent — cargo build --release -p infinigpu-device", warn=True)
-    override = gpu_rt.override_path(repos_dir)
+    override = gpu_rt.override_path(ctx.repos_dir)
     row("compose override", override.exists(), str(override) if override.exists() else "absent — is repos/infinigpu checked out?", warn=True)
+    is_built = not ctx.dry_run and built(ctx, rt)
+    row(
+        "render artifacts",
+        is_built,
+        "built in the infinigpu_build volume (vfio-user QEMU + device server)"
+        if is_built else "not built — run `iby gpu build` (or `iby up --gpu`, which builds them)",
+        warn=True,
+    )
     ctx.console.render(table)

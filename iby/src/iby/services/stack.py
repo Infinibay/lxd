@@ -17,7 +17,7 @@ from ..core import dotenv
 from ..core.context import AppContext
 from ..core.errors import IbyError, MissingTool
 from ..models.enums import InfiniserviceMode
-from ..runtime import detect, modules, registries
+from ..runtime import detect, gpu as gpu_rt, modules, registries
 from ..runtime.compose import StackRuntime
 from ..runtime.runtime import detect_runtime
 from . import gpu, infiniservice, lan, repos, wizard
@@ -93,15 +93,16 @@ def prepare_stack(
     decision = detect_runtime(ctx, want_kvm=want_kvm, merged_env=merged_env)
     compose_files += decision.extra_files
     if want_gpu:
-        # infinigpu render path: auto-detect the GPU, ensure the NVIDIA CDI spec
-        # (explained + sudo-confirmed inside), and compose in the GPU override.
+        # GPU needs KVM (real VMs). Only APPEND the override here — the privileged
+        # CDI setup + the (slow) container-native artifact build run in up() AFTER
+        # input validation + the infinigpu clone, so an invalid invocation never
+        # mutates the host or kicks off a long build first.
         if not decision.kvm_active:
             raise IbyError(
                 "--gpu needs KVM — GPU VMs are real VMs and the vfio-user device rides on the QEMU/KVM path.",
                 hint="run on a /dev/kvm host (this host reports KVM inactive), e.g. iby up --gpu --kvm.",
             )
-        override = gpu.ensure_gpu_ready(ctx, ctx.repos_dir)
-        compose_files.append(os.path.relpath(override, project))
+        compose_files.append(os.path.relpath(gpu_rt.override_path(ctx.repos_dir), project))
         ctx.console.info("infinigpu GPU override enabled (nvidia).")
     if want_cluster:
         compose_files.append("docker-compose.cluster.yml")
@@ -221,6 +222,13 @@ def up(
             "token emulation, OR --mtls for real remote mTLS nodes (iby node join, mTLS by default)."
         )
     repos.clone_all(ctx)
+    if want_gpu:
+        # After input validation + the app-repo clones: clone infinigpu (its build
+        # recipe + override live there), ensure the NVIDIA CDI spec (sudo, explained),
+        # and build the container-native render artifacts if the volume is empty
+        # (vfio-user QEMU + device server, ABI-matched to the backend image).
+        repos.clone_one(ctx, "infinigpu")
+        gpu.ensure_gpu_ready(ctx, rt)
     if rt.kvm_active:
         ensure_host_modules(ctx)
     _handle_infiniservice(ctx, rt, infiniservice_mode)

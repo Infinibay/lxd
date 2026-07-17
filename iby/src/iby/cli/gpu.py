@@ -11,6 +11,7 @@ import typer
 
 from ..core.context import AppContext
 from ..services import gpu as gpu_svc
+from ..services import stack as stack_svc
 
 gpu_app = typer.Typer(
     name="gpu",
@@ -21,17 +22,28 @@ gpu_app = typer.Typer(
 
 @gpu_app.command("status")
 def status(ctx: typer.Context) -> None:
-    """Show the detected GPU + render-path readiness (CDI, vfio-user QEMU, device binary)."""
+    """Show the detected GPU + render-path readiness (CDI + built render artifacts)."""
     app_ctx: AppContext = ctx.obj
-    gpu_svc.status(app_ctx, app_ctx.repos_dir)
+    rt = stack_svc.prepare_stack(app_ctx)
+    gpu_svc.status(app_ctx, rt)
 
 
 @gpu_app.command("setup")
 def setup(ctx: typer.Context) -> None:
-    """Ensure the GPU prerequisites (generate the NVIDIA CDI spec) WITHOUT starting the stack.
-
-    Explains each privileged step and asks for sudo before running it.
+    """Ensure the GPU prerequisites (NVIDIA CDI spec + built render artifacts) WITHOUT
+    starting the stack. Explains each privileged step and asks for sudo before running it.
     """
     app_ctx: AppContext = ctx.obj
-    gpu_svc.ensure_gpu_ready(app_ctx, app_ctx.repos_dir)
+    rt = stack_svc.prepare_stack(app_ctx)
+    gpu_svc.ensure_gpu_ready(app_ctx, rt)
     app_ctx.console.success("GPU prerequisites ready — start the stack with: iby up --gpu")
+
+
+@gpu_app.command("build")
+def build(ctx: typer.Context) -> None:
+    """Build the container-native render artifacts (vfio-user QEMU + device server) into
+    the shared volume, ABI-matched to the backend container. Slow the first time."""
+    app_ctx: AppContext = ctx.obj
+    rt = stack_svc.prepare_stack(app_ctx)
+    gpu_svc.build(app_ctx, rt)
+    app_ctx.console.success("GPU render artifacts built into the infinigpu_build volume.")

@@ -121,10 +121,10 @@ def run(ctx: AppContext, *, fix: bool = False) -> bool:
                 checks.append(Check("NVIDIA CDI", "warn", "absent — `iby up --gpu` / `iby gpu setup` generates it (sudo)"))
             else:
                 checks.append(Check("NVIDIA CDI", "warn", "nvidia-ctk missing — install nvidia-container-toolkit"))
-            if gpu.vfio_user_qemu() is None:
-                checks.append(Check("vfio-user QEMU", "warn", "absent — scripts/build-qemu-vfio-user.sh (needed for GPU VMs)"))
-            else:
-                checks.append(Check("vfio-user QEMU", "ok", str(gpu.VFIO_USER_QEMU)))
+            # The render artifacts (vfio-user QEMU + device server) are built into a
+            # volume ABI-matched to the backend container, not onto the host — so
+            # `iby gpu status` (which probes the volume) is the source of truth here.
+            checks.append(Check("GPU render artifacts", "info", "built by `iby up --gpu` / `iby gpu build`; `iby gpu status` shows readiness"))
         else:
             checks.append(Check("GPU", "n/a", "no NVIDIA GPU detected — infinigpu render path off"))
 
