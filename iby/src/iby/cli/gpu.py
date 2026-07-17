@@ -34,7 +34,9 @@ def setup(ctx: typer.Context) -> None:
     starting the stack. Explains each privileged step and asks for sudo before running it.
     """
     app_ctx: AppContext = ctx.obj
-    rt = stack_svc.prepare_stack(app_ctx)
+    # want_gpu=True so the compose set includes the GPU override that DEFINES the
+    # infinigpu-builder service (else `build` runs against a set missing it).
+    rt = stack_svc.prepare_stack(app_ctx, want_gpu=True)
     gpu_svc.ensure_gpu_ready(app_ctx, rt)
     app_ctx.console.success("GPU prerequisites ready — start the stack with: iby up --gpu")
 
@@ -44,6 +46,8 @@ def build(ctx: typer.Context) -> None:
     """Build the container-native render artifacts (vfio-user QEMU + device server) into
     the shared volume, ABI-matched to the backend container. Slow the first time."""
     app_ctx: AppContext = ctx.obj
-    rt = stack_svc.prepare_stack(app_ctx)
+    # want_gpu=True so the compose set includes the GPU override that DEFINES the
+    # infinigpu-builder service.
+    rt = stack_svc.prepare_stack(app_ctx, want_gpu=True)
     gpu_svc.build(app_ctx, rt)
     app_ctx.console.success("GPU render artifacts built into the infinigpu_build volume.")
