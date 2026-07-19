@@ -44,20 +44,6 @@ def ensure_gpu_ready(ctx: AppContext, rt: StackRuntime) -> None:
     for line in gpu_rt.nvidia_gpus(ctx.runner):
         ctx.console.info(f"  • {line}")
 
-    # The 3D render path needs a REAL (root) docker engine — NVIDIA's Vulkan driver does
-    # not initialize under a rootless user namespace (rootless podman/docker). We warn
-    # rather than block: the 2D/display path (NVENC) still works, and the user may only
-    # want that. Making the render path actually work is a host/engine choice, not iby's.
-    if not detect.engine_supports_gpu_render(ctx.runner):
-        ctx.console.warn(
-            "active container engine is rootless (podman) — NVIDIA Vulkan will NOT initialize, "
-            "so the infinigpu 3D render path renders BLACK (every GPU vkQueueSubmit fails). "
-            "nvidia-smi/CUDA/NVENC and the 2D display path still work.\n"
-            "  For working 3D render, run the stack under a REAL (root) docker engine "
-            "(e.g. add your user to the `docker` group and unset DOCKER_HOST so iby uses dockerd, "
-            "then `iby down && iby up --gpu`). Rootless podman cannot do NVIDIA Vulkan."
-        )
-
     override = gpu_rt.override_path(ctx.repos_dir)
     if not override.exists():
         raise IbyError(
@@ -194,16 +180,6 @@ def status(ctx: AppContext, rt: StackRuntime) -> None:
     row("GPU vendor", True, vendor.value)
     gpus = gpu_rt.nvidia_gpus(ctx.runner)
     row("GPUs", bool(gpus), "; ".join(gpus) or "nvidia-smi returned none", warn=not gpus)
-    render_ok = detect.engine_supports_gpu_render(ctx.runner)
-    row(
-        "engine (3D render)",
-        render_ok,
-        "real docker engine — NVIDIA Vulkan can initialize"
-        if render_ok
-        else "rootless engine (podman) — NVIDIA Vulkan will NOT init; 3D renders black. "
-        "GPU render needs a real docker engine. 2D/NVENC display still works.",
-        warn=True,
-    )
     row("nvidia-ctk", gpu_rt.has_nvidia_ctk(), "present" if gpu_rt.has_nvidia_ctk() else "missing (needed for CDI)", warn=True)
     row("CDI spec", gpu_rt.cdi_ready(), str(gpu_rt.CDI_SPEC) if gpu_rt.cdi_ready() else "absent — `iby gpu setup` generates it", warn=True)
     override = gpu_rt.override_path(ctx.repos_dir)

@@ -67,28 +67,6 @@ def engine_is_podman(runner: Runner) -> bool:
     return is_podman(runner)
 
 
-def engine_supports_gpu_render(runner: Runner) -> bool:
-    """True when the ACTIVE container engine can initialize NVIDIA **Vulkan** — the
-    infinigpu 3D render path.
-
-    NVIDIA's Vulkan driver does NOT initialize inside a rootless user namespace:
-    `vk_icdNegotiateLoaderICDInterfaceVersion` returns INITIALIZATION_FAILED and the
-    loader reports "no drivers", even though `nvidia-smi`, CUDA and NVENC all work
-    fine there. So the render path needs a REAL (root) docker engine — the initial
-    user namespace. Rootless podman (iby's Linux default) can drive the 2D/display
-    path (NVENC) but every GPU vkQueueSubmit fails, so the guest triangle/desktop
-    renders black.
-
-    Checks the SERVER, not just the client: `engine_is_podman` already catches a real
-    `docker` CLI whose DOCKER_HOST points at a podman socket. A rootless *docker* engine
-    is rejected too (same userns limitation)."""
-    if not has("docker"):
-        return False
-    if engine_is_podman(runner):
-        return False
-    return "rootless" not in runner.capture([container_cli(), "info"]).lower()
-
-
 def kvm_available() -> bool:
     return platform.system() == "Linux" and Path("/dev/kvm").exists()
 
