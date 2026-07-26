@@ -126,11 +126,17 @@ services:
       #   _NUMA_NODE=<n>       pin the device server to one NUMA node
       #   _PRESENT_HINT=0      restore the pre-fix present path (full-surface content hash +
       #                        an 8 MB allocation per frame) for an A/B on one binary
+      #   _PRESENT_VERIFY=<n>  audit 1 present in n: memcmp the host-resident composite against the
+      #                        guest's own scanout. Instrumentation, not a path — the gate on ever
+      #                        sourcing the present from the host image. ~600us per audited frame.
+      #   _ENC_ASYNC_RESPAWN=0 restore the synchronous encoder teardown on the doorbell thread
       INFINIGPU_ZEROCOPY_SCANOUT: ${INFINIGPU_ZEROCOPY_SCANOUT:-}
       INFINIGPU_PROFILE: ${INFINIGPU_PROFILE:-}
       INFINIGPU_BREAKDOWN: ${INFINIGPU_BREAKDOWN:-}
       INFINIGPU_NUMA_NODE: ${INFINIGPU_NUMA_NODE:-}
       INFINIGPU_PRESENT_HINT: ${INFINIGPU_PRESENT_HINT:-}
+      INFINIGPU_PRESENT_VERIFY: ${INFINIGPU_PRESENT_VERIFY:-}
+      INFINIGPU_ENC_ASYNC_RESPAWN: ${INFINIGPU_ENC_ASYNC_RESPAWN:-}
       # Master secret for signing commands to the in-guest infiniservice agent.
       # Per-VM key = HMAC(this, vmId). Unset => agent rejects all commands.
       INFINISERVICE_HMAC_MASTER_SECRET: ${INFINISERVICE_HMAC_MASTER_SECRET:-dev-insecure-change-me}
