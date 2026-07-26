@@ -109,6 +109,28 @@ services:
       # this is unset/!= "1". NOT for production — export
       # INFINIZATION_DISABLE_SANDBOX=0 on a substrate where the sandbox works.
       INFINIZATION_DISABLE_SANDBOX: ${INFINIZATION_DISABLE_SANDBOX:-1}
+      # infinigpu tuning knobs. The backend spawns one `infinigpu-device` server per
+      # GPU VM and the child inherits this environment verbatim
+      # (InfinigpuDeviceServer.childEnv = { ...process.env, ...extraEnv }), so these
+      # are the ONLY way to reach the device server in the dev stack. All default to
+      # unset => the device server keeps its own built-in defaults and behaviour is
+      # unchanged; a running server does NOT pick up a change (it is a detached
+      # process per VM), so a VM power cycle is required after setting one.
+      #   _ZEROCOPY_SCANOUT=1  skip the 8.3 MB present memcpy. NOTE: the "-39% p50" figure
+      #                        this line used to quote came from `bench_forwarded`, not the
+      #                        live desktop — the fast path needs a submit with no geometry,
+      #                        which is ~0.4% of compositor segments. Leave off pending
+      #                        full-stack validation.
+      #   _PROFILE=1           per-stage host timing histograms to the device log
+      #   _BREAKDOWN=1         split the replay hop into setup/record/gpu/copy
+      #   _NUMA_NODE=<n>       pin the device server to one NUMA node
+      #   _PRESENT_HINT=0      restore the pre-fix present path (full-surface content hash +
+      #                        an 8 MB allocation per frame) for an A/B on one binary
+      INFINIGPU_ZEROCOPY_SCANOUT: ${INFINIGPU_ZEROCOPY_SCANOUT:-}
+      INFINIGPU_PROFILE: ${INFINIGPU_PROFILE:-}
+      INFINIGPU_BREAKDOWN: ${INFINIGPU_BREAKDOWN:-}
+      INFINIGPU_NUMA_NODE: ${INFINIGPU_NUMA_NODE:-}
+      INFINIGPU_PRESENT_HINT: ${INFINIGPU_PRESENT_HINT:-}
       # Master secret for signing commands to the in-guest infiniservice agent.
       # Per-VM key = HMAC(this, vmId). Unset => agent rejects all commands.
       INFINISERVICE_HMAC_MASTER_SECRET: ${INFINISERVICE_HMAC_MASTER_SECRET:-dev-insecure-change-me}
