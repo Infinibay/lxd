@@ -130,6 +130,14 @@ services:
       #                        guest's own scanout. Instrumentation, not a path — the gate on ever
       #                        sourcing the present from the host image. ~600us per audited frame.
       #   _ENC_ASYNC_RESPAWN=0 restore the synchronous encoder teardown on the doorbell thread
+      #   _TEX_IDENT=0         key resident textures by CONTENT alone (the pre-identity behaviour).
+      #                        ON by default: a resident texture is keyed by the guest BUFFER it comes
+      #                        from, so a window whose pixels change every frame keeps ONE host image
+      #                        and is re-uploaded into it. Keyed on content — which is what =0 restores
+      #                        — every changed window was a cache MISS: a fresh VkImage + device-local
+      #                        allocation + view + sampler per frame, and the cache walking into its
+      #                        512 MB cap where a bulk evict took the static glyph atlases with it.
+      #                        Set it to 0 to A/B the two on one binary against one workload.
       #   _GPU=<id>            WHICH GPU to render on: an index ("1"), a PCI address ("af:00.0")
       #                        or a substring of the device name ("A5000"). Unset = the previous
       #                        automatic choice (NVIDIA proprietary, then discrete, then anything),
@@ -138,6 +146,7 @@ services:
       #                        card is suspect: an id that matches nothing is a hard error rather
       #                        than a quiet fall back to the card you were trying to avoid.
       INFINIGPU_GPU: ${INFINIGPU_GPU:-}
+      INFINIGPU_TEX_IDENT: ${INFINIGPU_TEX_IDENT:-}
       INFINIGPU_ZEROCOPY_SCANOUT: ${INFINIGPU_ZEROCOPY_SCANOUT:-}
       INFINIGPU_PROFILE: ${INFINIGPU_PROFILE:-}
       INFINIGPU_BREAKDOWN: ${INFINIGPU_BREAKDOWN:-}
