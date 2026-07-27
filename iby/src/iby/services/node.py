@@ -95,7 +95,7 @@ def prepare_node_env(ctx: AppContext, *, starting: bool, node_kvm: str | None = 
     if not (detect.has("docker") or detect.has("podman")):
         raise MissingTool(
             "no container engine found (need docker or podman)",
-            hint="install docker (with the compose plugin), or podman + podman-compose",
+            hint=detect.install_hint(),
         )
     compose_cmd = detect.resolve_compose(ctx.runner)
     if detect.is_podman(ctx.runner):
