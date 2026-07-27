@@ -130,6 +130,14 @@ services:
       #                        guest's own scanout. Instrumentation, not a path — the gate on ever
       #                        sourcing the present from the host image. ~600us per audited frame.
       #   _ENC_ASYNC_RESPAWN=0 restore the synchronous encoder teardown on the doorbell thread
+      #   _GPU=<id>            WHICH GPU to render on: an index ("1"), a PCI address ("af:00.0")
+      #                        or a substring of the device name ("A5000"). Unset = the previous
+      #                        automatic choice (NVIDIA proprietary, then discrete, then anything),
+      #                        which on a host with two identical cards always lands on the first
+      #                        one enumerated and offers no way to ask for the other. Set it when a
+      #                        card is suspect: an id that matches nothing is a hard error rather
+      #                        than a quiet fall back to the card you were trying to avoid.
+      INFINIGPU_GPU: ${INFINIGPU_GPU:-}
       INFINIGPU_ZEROCOPY_SCANOUT: ${INFINIGPU_ZEROCOPY_SCANOUT:-}
       INFINIGPU_PROFILE: ${INFINIGPU_PROFILE:-}
       INFINIGPU_BREAKDOWN: ${INFINIGPU_BREAKDOWN:-}
